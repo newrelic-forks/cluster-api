@@ -1033,7 +1033,7 @@ func ExtractControlPlaneMachine(machines []*clusterv1.Machine) (*clusterv1.Machi
 	nodes := []*clusterv1.Machine{}
 	controlPlaneMachines := []*clusterv1.Machine{}
 	for _, machine := range machines {
-		if util.IsControlPlaneMachine(machine) {
+		if util.IsControlPlaneMachine(machine.Spec) {
 			controlPlaneMachines = append(controlPlaneMachines, machine)
 		} else {
 			nodes = append(nodes, machine)

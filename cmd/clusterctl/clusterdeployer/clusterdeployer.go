@@ -56,7 +56,7 @@ func New(
 }
 
 // Create the cluster from the provided cluster definition and machine list.
-func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*clusterv1.Machine, provider provider.Deployer, kubeconfigOutput string, providerComponentsStoreFactory provider.ComponentsStoreFactory) error {
+func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*clusterv1.Machine, machineDeployments []*clusterv1.MachineDeployment, provider provider.Deployer, kubeconfigOutput string, providerComponentsStoreFactory provider.ComponentsStoreFactory) error {
 	controlPlaneMachine, nodes, err := clusterclient.ExtractControlPlaneMachine(machines)
 	if err != nil {
 		return errors.Wrap(err, "unable to separate control plane machines from node machines")
@@ -90,7 +90,7 @@ func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*cluster
 	}
 
 	klog.Infof("Creating control plane %v in namespace %q", controlPlaneMachine.Name, cluster.Namespace)
-	if err := phases.ApplyMachines(bootstrapClient, cluster.Namespace, []*clusterv1.Machine{controlPlaneMachine}); err != nil {
+	if err := phases.ApplyMachines(bootstrapClient, cluster.Namespace, []*clusterv1.Machine{controlPlaneMachine}, []*clusterv1.MachineDeployment{}); err != nil {
 		return errors.Wrap(err, "unable to create control plane machine")
 	}
 
@@ -136,7 +136,7 @@ func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*cluster
 	}
 
 	klog.Info("Creating node machines in target cluster.")
-	if err := phases.ApplyMachines(targetClient, cluster.Namespace, nodes); err != nil {
+	if err := phases.ApplyMachines(targetClient, cluster.Namespace, nodes, machineDeployments); err != nil {
 		return errors.Wrap(err, "unable to create node machines")
 	}
 
