@@ -68,7 +68,7 @@ func RandomString(n int) string {
 // Deprecated: use GetControlPlaneMachines.
 func GetControlPlaneMachine(machines []*clusterv1.Machine) *clusterv1.Machine {
 	for _, machine := range machines {
-		if IsControlPlaneMachine(machine) {
+		if IsControlPlaneMachine(machine.Spec) {
 			return machine
 		}
 	}
@@ -78,7 +78,7 @@ func GetControlPlaneMachine(machines []*clusterv1.Machine) *clusterv1.Machine {
 // GetControlPlaneMachines returns a slice containing control plane machines.
 func GetControlPlaneMachines(machines []*clusterv1.Machine) (res []*clusterv1.Machine) {
 	for _, machine := range machines {
-		if IsControlPlaneMachine(machine) {
+		if IsControlPlaneMachine(machine.Spec) {
 			res = append(res, machine)
 		}
 	}
@@ -91,6 +91,16 @@ func MachineP(machines []clusterv1.Machine) []*clusterv1.Machine {
 	ret := make([]*clusterv1.Machine, 0, len(machines))
 	for _, machine := range machines {
 		ret = append(ret, machine.DeepCopy())
+	}
+	return ret
+}
+
+// MachineDeploymentP converts a slice of machines into a slice of machine pointers.
+func MachineDeploymentP(machineDeployments []clusterv1.MachineDeployment) []*clusterv1.MachineDeployment {
+	// Convert to list of pointers
+	ret := make([]*clusterv1.MachineDeployment, 0, len(machineDeployments))
+	for _, machineDeployment := range machineDeployments {
+		ret = append(ret, machineDeployment.DeepCopy())
 	}
 	return ret
 }
@@ -142,8 +152,8 @@ func GetMachineIfExists(c client.Client, namespace, name string) (*clusterv1.Mac
 }
 
 // IsControlPlaneMachine checks machine is a control plane node.
-func IsControlPlaneMachine(machine *clusterv1.Machine) bool {
-	return machine.Spec.Versions.ControlPlane != ""
+func IsControlPlaneMachine(spec clusterv1.MachineSpec) bool {
+	return spec.Versions.ControlPlane != ""
 }
 
 // IsNodeReady returns true if a node is ready.
@@ -234,10 +244,10 @@ func ParseClusterYaml(file string) (*clusterv1.Cluster, error) {
 }
 
 // ParseMachinesYaml extracts machine objects from a file.
-func ParseMachinesYaml(file string) ([]*clusterv1.Machine, error) {
+func ParseMachinesYaml(file string) ([]*clusterv1.Machine, []*clusterv1.MachineDeployment, error) {
 	reader, err := os.Open(file)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer reader.Close()
@@ -245,10 +255,12 @@ func ParseMachinesYaml(file string) ([]*clusterv1.Machine, error) {
 	decoder := yaml.NewYAMLOrJSONDecoder(reader, 32)
 
 	var (
-		bytes       [][]byte
-		machineList clusterv1.MachineList
-		machine     clusterv1.Machine
-		machines    = []clusterv1.Machine{}
+		bytes              [][]byte
+		machineList        clusterv1.MachineList
+		machine            clusterv1.Machine
+		machines           = []clusterv1.Machine{}
+		machineDeployment  clusterv1.MachineDeployment
+		machineDeployments = []clusterv1.MachineDeployment{}
 	)
 
 	// TODO: use the universal decoder instead of doing this.
@@ -256,17 +268,17 @@ func ParseMachinesYaml(file string) ([]*clusterv1.Machine, error) {
 		if isMissingKind(err) {
 			err = errors.New(MachineListFormatDeprecationMessage)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	// TODO: this is O(n^2) and must be optimized
 	for _, ml := range bytes {
 		if err := json.Unmarshal(ml, &machineList); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, machine := range machineList.Items {
 			if machine.APIVersion == "" || machine.Kind == "" {
-				return nil, errors.New(MachineListFormatDeprecationMessage)
+				return nil, nil, errors.New(MachineListFormatDeprecationMessage)
 			}
 			machines = append(machines, machine)
 		}
@@ -274,21 +286,42 @@ func ParseMachinesYaml(file string) ([]*clusterv1.Machine, error) {
 
 	// reset reader to search for discrete Machine definitions
 	if _, err := reader.Seek(0, 0); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if bytes, err = decodeClusterV1Kinds(decoder, "Machine"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for _, m := range bytes {
 		if err := json.Unmarshal(m, &machine); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		machines = append(machines, machine)
 	}
 
-	return MachineP(machines), nil
+	// reset reader to search for discrete MachineDeployment definitions
+	if _, err := reader.Seek(0, 0); err != nil {
+		return nil, nil, err
+	}
+
+	if bytes, err = decodeClusterV1Kinds(decoder, "MachineDeployment"); err != nil {
+		return nil, nil, err
+	}
+
+	for _, m := range bytes {
+		if err := json.Unmarshal(m, &machineDeployment); err != nil {
+			return nil, nil, err
+		}
+
+		// Ignore MachineDeployments for controlplane machines
+		// TODO(rudoi): warn when one of these is detected?
+		if !IsControlPlaneMachine(machineDeployment.Spec.Template.Spec) {
+			machineDeployments = append(machineDeployments, machineDeployment)
+		}
+	}
+
+	return MachineP(machines), MachineDeploymentP(machineDeployments), nil
 }
 
 // isMissingKind reimplements runtime.IsMissingKind as the YAMLOrJSONDecoder

@@ -60,7 +60,7 @@ func RunAlphaPhaseApplyMachines(pamo *AlphaPhaseApplyMachinesOptions) error {
 		return err
 	}
 
-	machines, err := util.ParseMachinesYaml(pamo.Machines)
+	machines, machineDeployments, err := util.ParseMachinesYaml(pamo.Machines)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func RunAlphaPhaseApplyMachines(pamo *AlphaPhaseApplyMachinesOptions) error {
 		return errors.Wrap(err, "unable to create cluster client")
 	}
 
-	if err := phases.ApplyMachines(client, pamo.Namespace, machines); err != nil {
+	if err := phases.ApplyMachines(client, pamo.Namespace, machines, machineDeployments); err != nil {
 		return errors.Wrap(err, "unable to apply machines")
 	}
 
