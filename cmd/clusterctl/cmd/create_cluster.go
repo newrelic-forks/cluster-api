@@ -68,7 +68,7 @@ func RunCreate(co *CreateOptions) error {
 	if err != nil {
 		return err
 	}
-	m, err := util.ParseMachinesYaml(co.Machine)
+	m, md, err := util.ParseMachinesYaml(co.Machine)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func RunCreate(co *CreateOptions) error {
 		string(bc),
 		co.BootstrapFlags.Cleanup)
 
-	return d.Create(c, m, pd, co.KubeconfigOutput, pcsFactory)
+	return d.Create(c, m, md, pd, co.KubeconfigOutput, pcsFactory)
 }
 
 func init() {

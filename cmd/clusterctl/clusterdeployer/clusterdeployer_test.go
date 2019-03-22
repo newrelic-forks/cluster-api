@@ -849,6 +849,7 @@ func TestClusterCreate(t *testing.T) {
 			d := New(p, f, "", "", bootstrapComponent, testcase.cleanupExternal)
 
 			inputMachines := make(map[string][]*clusterv1.Machine)
+			inputMachineDeployments := make(map[string][]*clusterv1.MachineDeployment)
 
 			for namespace, inputClusters := range testcase.namespaceToInputCluster {
 				ns := namespace
@@ -860,7 +861,9 @@ func TestClusterCreate(t *testing.T) {
 				for _, inputCluster := range inputClusters {
 					inputCluster.Name = fmt.Sprintf("%s-cluster", ns)
 					inputMachines[inputCluster.Name] = generateMachines(inputCluster, ns)
-					err = d.Create(inputCluster, inputMachines[inputCluster.Name], pd, kubeconfigOut, &pcFactory)
+					inputMachineDeployments[inputCluster.Name] = generateMachineDeployments(inputCluster, ns)
+
+					err = d.Create(inputCluster, inputMachines[inputCluster.Name], inputMachineDeployments[inputCluster.Name], pd, kubeconfigOut, &pcFactory)
 					if err != nil {
 						break
 					}
@@ -958,11 +961,12 @@ func TestCreateProviderComponentsScenarios(t *testing.T) {
 				},
 			}
 			inputMachines := generateMachines(inputCluster, metav1.NamespaceDefault)
+			inputMachineDeployments := generateMachineDeployments(inputCluster, metav1.NamespaceDefault)
 			pcFactory := mockProviderComponentsStoreFactory{NewFromCoreclientsetPCStore: &tc.pcStore}
 			providerComponentsYaml := "---\nyaml: definition"
 			addonsYaml := "---\nyaml: definition"
 			d := New(p, f, providerComponentsYaml, addonsYaml, "", false)
-			err := d.Create(inputCluster, inputMachines, pd, kubeconfigOut, &pcFactory)
+			err := d.Create(inputCluster, inputMachines, inputMachineDeployments, pd, kubeconfigOut, &pcFactory)
 			if err == nil && tc.expectedError != "" {
 				t.Fatalf("error mismatch: got '%v', want '%v'", err, tc.expectedError)
 			}
@@ -1465,6 +1469,27 @@ func generateTestNodeMachine(cluster *clusterv1.Cluster, ns, name string) *clust
 	return &machine
 }
 
+func generateTestNodeMachineDeployment(cluster *clusterv1.Cluster, ns, name string) *clusterv1.MachineDeployment {
+	machineDeployment := clusterv1.MachineDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+	}
+	if cluster != nil {
+		machineDeployment.Labels = map[string]string{clusterv1.MachineClusterLabelName: cluster.Name}
+		machineDeployment.OwnerReferences = []metav1.OwnerReference{
+			{
+				APIVersion: cluster.APIVersion,
+				Kind:       cluster.Kind,
+				Name:       cluster.Name,
+				UID:        cluster.UID,
+			},
+		}
+	}
+	return &machineDeployment
+}
+
 func generateTestNodeMachines(cluster *clusterv1.Cluster, ns string, nodeNames []string) []*clusterv1.Machine {
 	nodes := make([]*clusterv1.Machine, 0, len(nodeNames))
 	for _, nn := range nodeNames {
@@ -1491,6 +1516,16 @@ func generateMachines(cluster *clusterv1.Cluster, ns string) []*clusterv1.Machin
 	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, []string{controlPlaneName})...)
 	machines = append(machines, generateTestNodeMachine(cluster, ns, workerName))
 	return machines
+}
+
+func generateMachineDeployments(cluster *clusterv1.Cluster, ns string) []*clusterv1.MachineDeployment {
+	var machineDeployments []*clusterv1.MachineDeployment
+	deploymentName := "node-deployment"
+	if cluster != nil {
+		deploymentName = cluster.Name + deploymentName
+	}
+	machineDeployments = append(machineDeployments, generateTestNodeMachineDeployment(cluster, ns, deploymentName))
+	return machineDeployments
 }
 
 func newMachineSetsFixture(ns string) []*clusterv1.MachineSet {
