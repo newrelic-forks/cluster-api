@@ -260,47 +260,41 @@ func TestParseClusterYaml(t *testing.T) {
 
 func TestParseMachineYaml(t *testing.T) {
 	t.Run("File does not exist", func(t *testing.T) {
-		_, _, err := ParseMachinesYaml("fileDoesNotExist")
+		_, err := ParseMachinesYaml("fileDoesNotExist")
 		if err == nil {
 			t.Fatal("Was able to parse a file that does not exist")
 		}
 	})
 	var testcases = []struct {
-		name                           string
-		contents                       string
-		expectErr                      bool
-		expectedMachineCount           int
-		expectedMachineDeploymentCount int
+		name                 string
+		contents             string
+		expectErr            bool
+		expectedMachineCount int
 	}{
 		{
-			name:                           "valid file using Machines",
-			contents:                       validMachines1,
-			expectedMachineCount:           2,
-			expectedMachineDeploymentCount: 0,
+			name:                 "valid file using Machines",
+			contents:             validMachines1,
+			expectedMachineCount: 2,
 		},
 		{
-			name:                           "valid file using MachineDeployments",
-			contents:                       validMachineDeployments1,
-			expectedMachineCount:           0,
-			expectedMachineDeploymentCount: 2,
+			name:                 "valid file using MachineDeployments",
+			contents:             validMachineDeployments1,
+			expectedMachineCount: 0,
 		},
 		{
-			name:                           "valid unified file with machine list",
-			contents:                       validUnified1,
-			expectedMachineCount:           1,
-			expectedMachineDeploymentCount: 0,
+			name:                 "valid unified file with machine list",
+			contents:             validUnified1,
+			expectedMachineCount: 1,
 		},
 		{
-			name:                           "valid unified file with separate machines",
-			contents:                       validUnified2,
-			expectedMachineCount:           2,
-			expectedMachineDeploymentCount: 1,
+			name:                 "valid unified file with separate machines",
+			contents:             validUnified2,
+			expectedMachineCount: 2,
 		},
 		{
-			name:                           "valid unified file with separate machines and a configmap",
-			contents:                       validUnified3,
-			expectedMachineCount:           2,
-			expectedMachineDeploymentCount: 0,
+			name:                 "valid unified file with separate machines and a configmap",
+			contents:             validUnified3,
+			expectedMachineCount: 2,
 		},
 		{
 			name:      "invalid file using MachineList",
@@ -336,7 +330,7 @@ func TestParseMachineYaml(t *testing.T) {
 			}
 			defer os.Remove(file)
 
-			m, md, err := ParseMachinesYaml(file)
+			m, err := ParseMachinesYaml(file)
 			if (testcase.expectErr && err == nil) || (!testcase.expectErr && err != nil) {
 				t.Fatalf("Unexpected returned error. Got: %v, Want Err: %v", err, testcase.expectErr)
 			}
@@ -349,8 +343,59 @@ func TestParseMachineYaml(t *testing.T) {
 			if len(m) != testcase.expectedMachineCount {
 				t.Fatalf("Unexpected machine count. Got: %v, Want: %v", len(m), testcase.expectedMachineCount)
 			}
+		})
+	}
+}
+
+func TestParseMachineDeploymentYaml(t *testing.T) {
+	t.Run("File does not exist", func(t *testing.T) {
+		_, err := ParseMachineDeploymentYaml("fileDoesNotExist")
+		if err == nil {
+			t.Fatal("Was able to parse a file that does not exist")
+		}
+	})
+	var testcases = []struct {
+		name                           string
+		contents                       string
+		expectErr                      bool
+		expectedMachineDeploymentCount int
+	}{
+		{
+			name:                           "valid file using MachineDeployments",
+			contents:                       validMachineDeployments1,
+			expectedMachineDeploymentCount: 2,
+		},
+		{
+			name:                           "valid unified file with separate machines",
+			contents:                       validUnified2,
+			expectedMachineDeploymentCount: 1,
+		},
+		{
+			name:      "gibberish in file",
+			contents:  `!@#blah ` + validMachines1 + ` blah!@#`,
+			expectErr: true,
+		},
+	}
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			file, err := createTempFile(testcase.contents)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(file)
+
+			md, err := ParseMachineDeploymentYaml(file)
+			if (testcase.expectErr && err == nil) || (!testcase.expectErr && err != nil) {
+				t.Fatalf("Unexpected returned error. Got: %v, Want Err: %v", err, testcase.expectErr)
+			}
+			if err != nil {
+				return
+			}
+			if md == nil {
+				t.Fatalf("No machinedeployments returned in success case.")
+			}
 			if len(md) != testcase.expectedMachineDeploymentCount {
-				t.Fatalf("Unexpected machinedeployment count. Got: %v, Want: %v", len(m), testcase.expectedMachineDeploymentCount)
+				t.Fatalf("Unexpected machinedeployment count. Got: %v, Want: %v", len(md), testcase.expectedMachineDeploymentCount)
 			}
 		})
 	}

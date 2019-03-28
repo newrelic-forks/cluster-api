@@ -68,7 +68,11 @@ func RunCreate(co *CreateOptions) error {
 	if err != nil {
 		return err
 	}
-	m, md, err := util.ParseMachinesYaml(co.Machine)
+	m, err := util.ParseMachinesYaml(co.Machine)
+	if err != nil {
+		return err
+	}
+	md, err := util.ParseMachineDeploymentYaml(co.Machine)
 	if err != nil {
 		return err
 	}
