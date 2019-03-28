@@ -60,7 +60,12 @@ func RunAlphaPhaseApplyMachines(pamo *AlphaPhaseApplyMachinesOptions) error {
 		return err
 	}
 
-	machines, machineDeployments, err := util.ParseMachinesYaml(pamo.Machines)
+	machines, err := util.ParseMachinesYaml(pamo.Machines)
+	if err != nil {
+		return err
+	}
+
+	machineDeployments, err := util.ParseMachineDeploymentYaml(pamo.Machines)
 	if err != nil {
 		return err
 	}
