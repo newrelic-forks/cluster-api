@@ -135,8 +135,13 @@ func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*cluster
 		return errors.Wrap(err, "unable to update target cluster endpoint")
 	}
 
+	_, nodeDeployments, err := clusterclient.ExtractControlPlaneMachineDeployments(machineDeployments)
+	if err != nil {
+		return errors.Wrap(err, "unable to separate control plane machineDeployments from node machineDeployments")
+	}
+
 	klog.Info("Creating node machines in target cluster.")
-	if err := phases.ApplyMachines(targetClient, cluster.Namespace, nodes, machineDeployments); err != nil {
+	if err := phases.ApplyMachines(targetClient, cluster.Namespace, nodes, nodeDeployments); err != nil {
 		return errors.Wrap(err, "unable to create node machines")
 	}
 
