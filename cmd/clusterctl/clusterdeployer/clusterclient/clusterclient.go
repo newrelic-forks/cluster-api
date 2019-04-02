@@ -1019,28 +1019,49 @@ func GetClusterAPIObject(client Client, clusterName, namespace string) (*cluster
 		return nil, nil, nil, errors.Wrapf(err, "unable to fetch cluster %s/%s", namespace, clusterName)
 	}
 
-	controlPlane, nodes, err := ExtractControlPlaneMachine(machines)
+	controlPlane, nodes, err := ExtractControlPlaneMachines(machines)
 	if err != nil {
 		return nil, nil, nil, errors.Wrapf(err, "unable to fetch control plane machine in cluster %s/%s", namespace, clusterName)
 	}
-	return cluster, controlPlane, nodes, nil
+	return cluster, controlPlane[0], nodes, nil
 }
 
-// ExtractControlPlaneMachine separates the machines running the control plane (singular) from the incoming machines.
+// ExtractControlPlaneMachines separates the machines running the control plane from the incoming machines.
 // This is currently done by looking at which machine specifies the control plane version.
-// TODO: Cleanup.
-func ExtractControlPlaneMachine(machines []*clusterv1.Machine) (*clusterv1.Machine, []*clusterv1.Machine, error) {
+func ExtractControlPlaneMachines(machines []*clusterv1.Machine) ([]*clusterv1.Machine, []*clusterv1.Machine, error) {
 	nodes := []*clusterv1.Machine{}
 	controlPlaneMachines := []*clusterv1.Machine{}
 	for _, machine := range machines {
-		if util.IsControlPlaneMachine(machine) {
+		if util.IsControlPlaneMachine(machine.Spec) {
 			controlPlaneMachines = append(controlPlaneMachines, machine)
 		} else {
 			nodes = append(nodes, machine)
 		}
 	}
-	if len(controlPlaneMachines) != 1 {
-		return nil, nil, errors.Errorf("expected one control plane machine, got: %v", len(controlPlaneMachines))
+	if len(controlPlaneMachines) < 1 {
+		return nil, nil, errors.Errorf("expected one or more control plane machines, got: %v", len(controlPlaneMachines))
 	}
-	return controlPlaneMachines[0], nodes, nil
+	return controlPlaneMachines, nodes, nil
+}
+
+// ExtractControlPlaneMachineDeployments separates machinedeployments defining control plane machines from those defining nodes.
+// This is currently done by looking at which machinedeployments specify machine templates with a control plane version
+func ExtractControlPlaneMachineDeployments(machineDeployments []*clusterv1.MachineDeployment) (*clusterv1.MachineDeployment, []*clusterv1.MachineDeployment, error) {
+	nodeDeployments := []*clusterv1.MachineDeployment{}
+	controlPlaneDeployments := []*clusterv1.MachineDeployment{}
+	for _, machineDeployment := range machineDeployments {
+		if util.IsControlPlaneMachine(machineDeployment.Spec.Template.Spec) {
+			controlPlaneDeployments = append(controlPlaneDeployments, machineDeployment)
+		} else {
+			nodeDeployments = append(nodeDeployments, machineDeployment)
+		}
+	}
+
+	if len(controlPlaneDeployments) > 1 {
+		return nil, nil, errors.Errorf("expected one or zero control plane machinedeployments, got: %v", len(controlPlaneDeployments))
+	} else if len(controlPlaneDeployments) == 1 {
+		return controlPlaneDeployments[0], nodeDeployments, nil
+	}
+
+	return nil, nodeDeployments, nil
 }
