@@ -1046,7 +1046,7 @@ func ExtractControlPlaneMachines(machines []*clusterv1.Machine) ([]*clusterv1.Ma
 	nodes := []*clusterv1.Machine{}
 	controlPlaneMachines := []*clusterv1.Machine{}
 	for _, machine := range machines {
-		if util.IsControlPlaneMachine(machine.Spec) {
+		if util.IsControlPlaneMachine(machine) {
 			controlPlaneMachines = append(controlPlaneMachines, machine)
 		} else {
 			nodes = append(nodes, machine)
@@ -1064,7 +1064,7 @@ func ExtractControlPlaneMachineDeployments(machineDeployments []*clusterv1.Machi
 	nodeDeployments := []*clusterv1.MachineDeployment{}
 	controlPlaneDeployments := []*clusterv1.MachineDeployment{}
 	for _, machineDeployment := range machineDeployments {
-		if util.IsControlPlaneMachine(machineDeployment.Spec.Template.Spec) {
+		if util.IsControlPlaneMachineDeployment(machineDeployment) {
 			controlPlaneDeployments = append(controlPlaneDeployments, machineDeployment)
 		} else {
 			nodeDeployments = append(nodeDeployments, machineDeployment)
