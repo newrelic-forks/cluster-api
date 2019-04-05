@@ -1578,15 +1578,15 @@ func generateTestNodeMachineDeployments(cluster *clusterv1.Cluster, ns string, n
 func generateInvalidExtractControlPlaneMachine(cluster *clusterv1.Cluster, ns string, controlPlaneNames, nodeNames []string) []*clusterv1.Machine {
 	var machines []*clusterv1.Machine // nolint
 	for _, name := range controlPlaneNames {
-		machines = append(machines, generateTestControlPlaneMachine(cluster, ns, name))
+		machines = append(machines, generateTestControlPlaneMachines(cluster, ns, []string{name})...)
 	}
 	machines = append(machines, generateTestNodeMachines(cluster, ns, nodeNames)...)
 	return machines
 }
 
-func generateValidExtractControlPlaneMachineInput(cluster *clusterv1.Cluster, ns, controlPlaneName string, nodeNames []string) []*clusterv1.Machine {
+func generateValidExtractControlPlaneMachineInput(cluster *clusterv1.Cluster, ns string, controlPlaneNames, nodeNames []string) []*clusterv1.Machine {
 	var machines []*clusterv1.Machine
-	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, controlPlaneName)...)
+	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, controlPlaneNames)...)
 	machines = append(machines, generateTestNodeMachines(cluster, ns, nodeNames)...)
 	return machines
 }
