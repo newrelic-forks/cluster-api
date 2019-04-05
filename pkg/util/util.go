@@ -68,7 +68,7 @@ func RandomString(n int) string {
 // Deprecated: use GetControlPlaneMachines.
 func GetControlPlaneMachine(machines []*clusterv1.Machine) *clusterv1.Machine {
 	for _, machine := range machines {
-		if IsControlPlaneMachine(machine.Spec) {
+		if IsControlPlaneMachine(machine) {
 			return machine
 		}
 	}
@@ -78,7 +78,7 @@ func GetControlPlaneMachine(machines []*clusterv1.Machine) *clusterv1.Machine {
 // GetControlPlaneMachines returns a slice containing control plane machines.
 func GetControlPlaneMachines(machines []*clusterv1.Machine) (res []*clusterv1.Machine) {
 	for _, machine := range machines {
-		if IsControlPlaneMachine(machine.Spec) {
+		if IsControlPlaneMachine(machine) {
 			res = append(res, machine)
 		}
 	}
@@ -152,8 +152,13 @@ func GetMachineIfExists(c client.Client, namespace, name string) (*clusterv1.Mac
 }
 
 // IsControlPlaneMachine checks machine is a control plane node.
-func IsControlPlaneMachine(spec clusterv1.MachineSpec) bool {
-	return spec.Versions.ControlPlane != ""
+func IsControlPlaneMachine(machine *clusterv1.Machine) bool {
+	return machine.Spec.Versions.ControlPlane != ""
+}
+
+// IsControlPlaneMachineDeployment checks machinedeployment defines control plane nodes
+func IsControlPlaneMachineDeployment(machinedeployment *clusterv1.MachineDeployment) bool {
+	return machinedeployment.Spec.Template.Spec.Versions.ControlPlane != ""
 }
 
 // IsNodeReady returns true if a node is ready.
