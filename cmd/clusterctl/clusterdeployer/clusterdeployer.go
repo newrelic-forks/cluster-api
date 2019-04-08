@@ -90,7 +90,7 @@ func (d *ClusterDeployer) Create(cluster *clusterv1.Cluster, machines []*cluster
 	}
 
 	klog.Infof("Creating control plane %v in namespace %q", controlPlaneMachines[0].Name, cluster.Namespace)
-	if err := phases.ApplyMachines(bootstrapClient, cluster.Namespace, []*clusterv1.Machine{controlPlaneMachines[0]}, machineDeployments); err != nil {
+	if err := phases.ApplyMachines(bootstrapClient, cluster.Namespace, []*clusterv1.Machine{controlPlaneMachines[0]}, []*clusterv1.MachineDeployment{}); err != nil {
 		return errors.Wrap(err, "unable to create control plane machine")
 	}
 
