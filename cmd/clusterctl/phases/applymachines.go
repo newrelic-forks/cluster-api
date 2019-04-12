@@ -23,7 +23,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 )
 
-func ApplyMachines(client clusterclient.Client, namespace string, machines []*clusterv1.Machine) error {
+func ApplyMachines(client clusterclient.Client, namespace string, machines []*clusterv1.Machine, machineDeployments []*clusterv1.MachineDeployment) error {
 	if namespace == "" {
 		namespace = client.GetContextNamespace()
 	}
@@ -35,6 +35,11 @@ func ApplyMachines(client clusterclient.Client, namespace string, machines []*cl
 
 	klog.Infof("Creating machines in namespace %q", namespace)
 	if err := client.CreateMachines(machines, namespace); err != nil {
+		return err
+	}
+
+	klog.Infof("Creating machinedeployments in namespace %q", namespace)
+	if err := client.CreateMachineDeployments(machineDeployments, namespace); err != nil {
 		return err
 	}
 

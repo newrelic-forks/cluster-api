@@ -1057,3 +1057,25 @@ func ExtractControlPlaneMachines(machines []*clusterv1.Machine) ([]*clusterv1.Ma
 	}
 	return controlPlaneMachines, nodes, nil
 }
+
+// ExtractControlPlaneMachineDeployments separates machinedeployments defining control plane machines from those defining nodes.
+// This is currently done by looking at which machinedeployments specify machine templates with a control plane version
+func ExtractControlPlaneMachineDeployments(machineDeployments []*clusterv1.MachineDeployment) (*clusterv1.MachineDeployment, []*clusterv1.MachineDeployment, error) {
+	nodeDeployments := []*clusterv1.MachineDeployment{}
+	controlPlaneDeployments := []*clusterv1.MachineDeployment{}
+	for _, machineDeployment := range machineDeployments {
+		if util.IsControlPlaneMachineDeployment(machineDeployment) {
+			controlPlaneDeployments = append(controlPlaneDeployments, machineDeployment)
+		} else {
+			nodeDeployments = append(nodeDeployments, machineDeployment)
+		}
+	}
+
+	if len(controlPlaneDeployments) > 1 {
+		return nil, nil, errors.Errorf("expected one or zero control plane machinedeployments, got: %v", len(controlPlaneDeployments))
+	} else if len(controlPlaneDeployments) == 1 {
+		return controlPlaneDeployments[0], nodeDeployments, nil
+	}
+
+	return nil, nodeDeployments, nil
+}

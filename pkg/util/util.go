@@ -95,6 +95,16 @@ func MachineP(machines []clusterv1.Machine) []*clusterv1.Machine {
 	return ret
 }
 
+// MachineDeploymentP converts a slice of machines into a slice of machine pointers.
+func MachineDeploymentP(machineDeployments []clusterv1.MachineDeployment) []*clusterv1.MachineDeployment {
+	// Convert to list of pointers
+	ret := make([]*clusterv1.MachineDeployment, 0, len(machineDeployments))
+	for _, machineDeployment := range machineDeployments {
+		ret = append(ret, machineDeployment.DeepCopy())
+	}
+	return ret
+}
+
 // Home returns the user home directory.
 func Home() string {
 	home := os.Getenv("HOME")
@@ -144,6 +154,11 @@ func GetMachineIfExists(c client.Client, namespace, name string) (*clusterv1.Mac
 // IsControlPlaneMachine checks machine is a control plane node.
 func IsControlPlaneMachine(machine *clusterv1.Machine) bool {
 	return machine.Spec.Versions.ControlPlane != ""
+}
+
+// IsControlPlaneMachineDeployment checks machinedeployment defines control plane nodes
+func IsControlPlaneMachineDeployment(machinedeployment *clusterv1.MachineDeployment) bool {
+	return machinedeployment.Spec.Template.Spec.Versions.ControlPlane != ""
 }
 
 // IsNodeReady returns true if a node is ready.
@@ -289,6 +304,37 @@ func ParseMachinesYaml(file string) ([]*clusterv1.Machine, error) {
 	}
 
 	return MachineP(machines), nil
+}
+
+// ParseMachineDeploymentYaml extracts machinedeployment objects from a file.
+func ParseMachineDeploymentYaml(file string) ([]*clusterv1.MachineDeployment, error) {
+	reader, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+
+	defer reader.Close()
+
+	decoder := yaml.NewYAMLOrJSONDecoder(reader, 32)
+
+	var (
+		bytes              [][]byte
+		machineDeployment  clusterv1.MachineDeployment
+		machineDeployments = []clusterv1.MachineDeployment{}
+	)
+
+	if bytes, err = decodeClusterV1Kinds(decoder, "MachineDeployment"); err != nil {
+		return nil, err
+	}
+
+	for _, md := range bytes {
+		if err := json.Unmarshal(md, &machineDeployment); err != nil {
+			return nil, err
+		}
+		machineDeployments = append(machineDeployments, machineDeployment)
+	}
+
+	return MachineDeploymentP(machineDeployments), nil
 }
 
 // isMissingKind reimplements runtime.IsMissingKind as the YAMLOrJSONDecoder

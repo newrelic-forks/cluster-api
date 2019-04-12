@@ -849,6 +849,7 @@ func TestClusterCreate(t *testing.T) {
 			d := New(p, f, "", "", bootstrapComponent, testcase.cleanupExternal)
 
 			inputMachines := make(map[string][]*clusterv1.Machine)
+			inputMachineDeployments := make(map[string][]*clusterv1.MachineDeployment)
 
 			for namespace, inputClusters := range testcase.namespaceToInputCluster {
 				ns := namespace
@@ -860,7 +861,9 @@ func TestClusterCreate(t *testing.T) {
 				for _, inputCluster := range inputClusters {
 					inputCluster.Name = fmt.Sprintf("%s-cluster", ns)
 					inputMachines[inputCluster.Name] = generateMachines(inputCluster, ns)
-					err = d.Create(inputCluster, inputMachines[inputCluster.Name], pd, kubeconfigOut, &pcFactory)
+					inputMachineDeployments[inputCluster.Name] = generateMachineDeployments(inputCluster, ns)
+
+					err = d.Create(inputCluster, inputMachines[inputCluster.Name], inputMachineDeployments[inputCluster.Name], pd, kubeconfigOut, &pcFactory)
 					if err != nil {
 						break
 					}
@@ -958,11 +961,12 @@ func TestCreateProviderComponentsScenarios(t *testing.T) {
 				},
 			}
 			inputMachines := generateMachines(inputCluster, metav1.NamespaceDefault)
+			inputMachineDeployments := generateMachineDeployments(inputCluster, metav1.NamespaceDefault)
 			pcFactory := mockProviderComponentsStoreFactory{NewFromCoreclientsetPCStore: &tc.pcStore}
 			providerComponentsYaml := "---\nyaml: definition"
 			addonsYaml := "---\nyaml: definition"
 			d := New(p, f, providerComponentsYaml, addonsYaml, "", false)
-			err := d.Create(inputCluster, inputMachines, pd, kubeconfigOut, &pcFactory)
+			err := d.Create(inputCluster, inputMachines, inputMachineDeployments, pd, kubeconfigOut, &pcFactory)
 			if err == nil && tc.expectedError != "" {
 				t.Fatalf("error mismatch: got '%v', want '%v'", err, tc.expectedError)
 			}
@@ -1044,6 +1048,65 @@ func TestExtractControlPlaneMachine(t *testing.T) {
 
 			if len(tc.expectedNodeMachines) != len(actualNodes) {
 				t.Fatalf("%s: extractControlPlaneMachine(%q): gotNodes = %q; wantNodes = %q", tc.name, len(tc.inputMachines), len(actualNodes), len(tc.expectedNodeMachines))
+			}
+		})
+	}
+}
+
+func TestExtractControlPlaneMachineDeployments(t *testing.T) {
+	const singleControlPlaneName = "test-control-plane"
+	multipleControlPlaneNames := []string{"test-control-plane-1", "test-control-plane-2"}
+	const singleNodeDeploymentName = "test-nodes"
+	multipleNodeDeploymentNames := []string{"test-nodes-1", "test-nodes-2", "test-nodes-3"}
+
+	testCases := []struct {
+		name                    string
+		inputMachineDeployments []*clusterv1.MachineDeployment
+		expectedControlPlane    *clusterv1.MachineDeployment
+		expectedNodes           []*clusterv1.MachineDeployment
+		expectedError           error
+	}{
+		{
+			name:                    "success_1_control_plane_1_node",
+			inputMachineDeployments: generateMachineDeployments(nil, metav1.NamespaceDefault),
+			expectedControlPlane:    generateTestControlPlaneMachineDeployment(nil, metav1.NamespaceDefault, singleControlPlaneName),
+			expectedNodes:           generateTestNodeMachineDeployments(nil, metav1.NamespaceDefault, []string{singleNodeDeploymentName}),
+			expectedError:           nil,
+		},
+		{
+			name:                    "success_1_control_plane_multiple_nodes",
+			inputMachineDeployments: generateValidExtractControlPlaneMachineDeploymentInput(nil, metav1.NamespaceDefault, singleControlPlaneName, multipleNodeDeploymentNames),
+			expectedControlPlane:    generateTestControlPlaneMachineDeployment(nil, metav1.NamespaceDefault, singleControlPlaneName),
+			expectedNodes:           generateTestNodeMachineDeployments(nil, metav1.NamespaceDefault, multipleNodeDeploymentNames),
+			expectedError:           nil,
+		},
+		{
+			name:                    "fail_more_than_1_control_plane_not_allowed",
+			inputMachineDeployments: generateInvalidExtractControlPlaneMachineDeployment(nil, metav1.NamespaceDefault, multipleControlPlaneNames, multipleNodeDeploymentNames),
+			expectedControlPlane:    nil,
+			expectedNodes:           nil,
+			expectedError:           errors.New("expected one or zero control plane machinedeployments, got: 2"),
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actualControlPlane, actualNodes, actualError := clusterclient.ExtractControlPlaneMachineDeployments(tc.inputMachineDeployments)
+
+			if tc.expectedError == nil && actualError != nil {
+				t.Fatalf("%s: extractControlPlaneMachine(%q): gotError %q; wantError [nil]", tc.name, len(tc.inputMachineDeployments), actualError)
+			}
+
+			if tc.expectedError != nil && tc.expectedError.Error() != actualError.Error() {
+				t.Fatalf("%s: extractControlPlaneMachine(%q): gotError %q; wantError %q", tc.name, len(tc.inputMachineDeployments), actualError, tc.expectedError)
+			}
+
+			if (tc.expectedControlPlane == nil && actualControlPlane != nil) ||
+				(tc.expectedControlPlane != nil && actualControlPlane == nil) {
+				t.Fatalf("%s: extractControlPlaneMachine(%q): gotControlPlane = %v; wantControlPlane = %v", tc.name, len(tc.inputMachineDeployments), actualControlPlane != nil, tc.expectedControlPlane != nil)
+			}
+
+			if len(tc.expectedNodes) != len(actualNodes) {
+				t.Fatalf("%s: extractControlPlaneMachine(%q): gotNodes = %q; wantNodes = %q", tc.name, len(tc.inputMachineDeployments), len(actualNodes), len(tc.expectedNodes))
 			}
 		})
 	}
@@ -1444,6 +1507,16 @@ func generateTestControlPlaneMachines(cluster *clusterv1.Cluster, ns string, nam
 	return machines
 }
 
+func generateTestControlPlaneMachineDeployment(cluster *clusterv1.Cluster, ns, name string) *clusterv1.MachineDeployment {
+	machineDeployment := generateTestNodeMachineDeployment(cluster, ns, name)
+	machineDeployment.Spec.Template.Spec = clusterv1.MachineSpec{
+		Versions: clusterv1.MachineVersionInfo{
+			ControlPlane: "1.10.1",
+		},
+	}
+	return machineDeployment
+}
+
 func generateTestNodeMachine(cluster *clusterv1.Cluster, ns, name string) *clusterv1.Machine {
 	machine := clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1465,6 +1538,27 @@ func generateTestNodeMachine(cluster *clusterv1.Cluster, ns, name string) *clust
 	return &machine
 }
 
+func generateTestNodeMachineDeployment(cluster *clusterv1.Cluster, ns, name string) *clusterv1.MachineDeployment {
+	machineDeployment := clusterv1.MachineDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+	}
+	if cluster != nil {
+		machineDeployment.Labels = map[string]string{clusterv1.MachineClusterLabelName: cluster.Name}
+		machineDeployment.OwnerReferences = []metav1.OwnerReference{
+			{
+				APIVersion: cluster.APIVersion,
+				Kind:       cluster.Kind,
+				Name:       cluster.Name,
+				UID:        cluster.UID,
+			},
+		}
+	}
+	return &machineDeployment
+}
+
 func generateTestNodeMachines(cluster *clusterv1.Cluster, ns string, nodeNames []string) []*clusterv1.Machine {
 	nodes := make([]*clusterv1.Machine, 0, len(nodeNames))
 	for _, nn := range nodeNames {
@@ -1473,11 +1567,44 @@ func generateTestNodeMachines(cluster *clusterv1.Cluster, ns string, nodeNames [
 	return nodes
 }
 
-func generateValidExtractControlPlaneMachineInput(cluster *clusterv1.Cluster, ns string, controlPlaneName []string, nodeNames []string) []*clusterv1.Machine {
-	var machines []*clusterv1.Machine
-	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, controlPlaneName)...)
+func generateTestNodeMachineDeployments(cluster *clusterv1.Cluster, ns string, nodeDeploymentNames []string) []*clusterv1.MachineDeployment {
+	nodeDeployments := make([]*clusterv1.MachineDeployment, 0, len(nodeDeploymentNames))
+	for _, ndn := range nodeDeploymentNames {
+		nodeDeployments = append(nodeDeployments, generateTestNodeMachineDeployment(cluster, ns, ndn))
+	}
+	return nodeDeployments
+}
+
+func generateInvalidExtractControlPlaneMachine(cluster *clusterv1.Cluster, ns string, controlPlaneNames, nodeNames []string) []*clusterv1.Machine {
+	var machines []*clusterv1.Machine // nolint
+	for _, name := range controlPlaneNames {
+		machines = append(machines, generateTestControlPlaneMachines(cluster, ns, []string{name})...)
+	}
 	machines = append(machines, generateTestNodeMachines(cluster, ns, nodeNames)...)
 	return machines
+}
+
+func generateValidExtractControlPlaneMachineInput(cluster *clusterv1.Cluster, ns string, controlPlaneNames, nodeNames []string) []*clusterv1.Machine {
+	var machines []*clusterv1.Machine
+	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, controlPlaneNames)...)
+	machines = append(machines, generateTestNodeMachines(cluster, ns, nodeNames)...)
+	return machines
+}
+
+func generateInvalidExtractControlPlaneMachineDeployment(cluster *clusterv1.Cluster, ns string, controlPlaneNames, nodeDeploymentNames []string) []*clusterv1.MachineDeployment {
+	var machineDeployments []*clusterv1.MachineDeployment
+	for _, name := range controlPlaneNames {
+		machineDeployments = append(machineDeployments, generateTestControlPlaneMachineDeployment(cluster, ns, name))
+	}
+	machineDeployments = append(machineDeployments, generateTestNodeMachineDeployments(cluster, ns, nodeDeploymentNames)...)
+	return machineDeployments
+}
+
+func generateValidExtractControlPlaneMachineDeploymentInput(cluster *clusterv1.Cluster, ns, controlPlaneName string, nodeDeploymentNames []string) []*clusterv1.MachineDeployment {
+	var machineDeployments []*clusterv1.MachineDeployment
+	machineDeployments = append(machineDeployments, generateTestControlPlaneMachineDeployment(cluster, ns, controlPlaneName))
+	machineDeployments = append(machineDeployments, generateTestNodeMachineDeployments(cluster, ns, nodeDeploymentNames)...)
+	return machineDeployments
 }
 
 func generateMachines(cluster *clusterv1.Cluster, ns string) []*clusterv1.Machine {
@@ -1491,6 +1618,19 @@ func generateMachines(cluster *clusterv1.Cluster, ns string) []*clusterv1.Machin
 	machines = append(machines, generateTestControlPlaneMachines(cluster, ns, []string{controlPlaneName})...)
 	machines = append(machines, generateTestNodeMachine(cluster, ns, workerName))
 	return machines
+}
+
+func generateMachineDeployments(cluster *clusterv1.Cluster, ns string) []*clusterv1.MachineDeployment {
+	var machineDeployments []*clusterv1.MachineDeployment
+	controlPlaneName := "control-plane"
+	nodeDeploymentName := "node-deployment"
+	if cluster != nil {
+		controlPlaneName = cluster.Name + controlPlaneName
+		nodeDeploymentName = cluster.Name + nodeDeploymentName
+	}
+	machineDeployments = append(machineDeployments, generateTestControlPlaneMachineDeployment(cluster, ns, controlPlaneName))
+	machineDeployments = append(machineDeployments, generateTestNodeMachineDeployment(cluster, ns, nodeDeploymentName))
+	return machineDeployments
 }
 
 func newMachineSetsFixture(ns string) []*clusterv1.MachineSet {

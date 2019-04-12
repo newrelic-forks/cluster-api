@@ -72,6 +72,10 @@ func RunCreate(co *CreateOptions) error {
 	if err != nil {
 		return err
 	}
+	md, err := util.ParseMachineDeploymentYaml(co.Machine)
+	if err != nil {
+		return err
+	}
 
 	bootstrapProvider, err := bootstrap.Get(co.BootstrapFlags)
 	if err != nil {
@@ -109,7 +113,7 @@ func RunCreate(co *CreateOptions) error {
 		string(bc),
 		co.BootstrapFlags.Cleanup)
 
-	return d.Create(c, m, pd, co.KubeconfigOutput, pcsFactory)
+	return d.Create(c, m, md, pd, co.KubeconfigOutput, pcsFactory)
 }
 
 func init() {
