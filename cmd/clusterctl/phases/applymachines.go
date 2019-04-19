@@ -28,6 +28,8 @@ func ApplyMachines(client clusterclient.Client, namespace string, machines []*cl
 		namespace = client.GetContextNamespace()
 	}
 
+	klog.Infof("INCOMING MACHINE PROVIDER SPEC: %q", string(machines[0].Spec.ProviderSpec.Value.Raw))
+
 	err := client.EnsureNamespace(namespace)
 	if err != nil {
 		return errors.Wrapf(err, "unable to ensure namespace %q", namespace)

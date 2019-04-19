@@ -25,7 +25,6 @@ rules:
   - list
   - watch
   - create
-  - patch
 - apiGroups:
   - cluster.k8s.io
   resources:
@@ -43,7 +42,6 @@ rules:
   - cluster.k8s.io
   resources:
   - machinedeployments
-  - machinedeployments/status
   verbs:
   - get
   - list
@@ -56,7 +54,6 @@ rules:
   - cluster.k8s.io
   resources:
   - machinesets
-  - machinesets/status
   verbs:
   - get
   - list

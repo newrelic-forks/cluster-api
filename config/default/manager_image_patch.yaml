@@ -7,5 +7,5 @@ spec:
   template:
     spec:
       containers:
-      - image: gcr.io/k8s-cluster-api/cluster-api-controller:latest
+      - image: index.docker.io/newrelic/cluster-api-controller-amd64:control-subnet
         name: manager
