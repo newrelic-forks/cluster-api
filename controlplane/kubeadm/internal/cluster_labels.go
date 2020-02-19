@@ -17,7 +17,8 @@ limitations under the License.
 package internal
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 )
@@ -39,8 +40,15 @@ func ControlPlaneLabelsForCluster(clusterName string) map[string]string {
 }
 
 // ControlPlaneSelectorForCluster returns the label selector necessary to get control plane machines for a given cluster.
-func ControlPlaneSelectorForCluster(clusterName string) *metav1.LabelSelector {
-	return &metav1.LabelSelector{
-		MatchLabels: ControlPlaneLabelsForCluster(clusterName),
+func ControlPlaneSelectorForCluster(clusterName string) labels.Selector {
+	must := func(r *labels.Requirement, err error) *labels.Requirement {
+		if err != nil {
+			panic(err)
+		}
+		return r
 	}
+	return labels.NewSelector().Add(
+		*must(labels.NewRequirement(clusterv1.ClusterLabelName, selection.Equals, []string{clusterName})),
+		*must(labels.NewRequirement(clusterv1.MachineControlPlaneLabelName, selection.Exists, []string{})),
+	)
 }

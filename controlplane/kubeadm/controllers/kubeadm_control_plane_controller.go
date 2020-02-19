@@ -33,6 +33,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -89,6 +90,8 @@ type KubeadmControlPlaneReconciler struct {
 	remoteClientGetter remote.ClusterClientGetter
 
 	managementCluster managementCluster
+
+	uncachedClient client.Reader
 }
 
 func (r *KubeadmControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
@@ -112,6 +115,7 @@ func (r *KubeadmControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, optio
 	if r.remoteClientGetter == nil {
 		r.remoteClientGetter = remote.NewClusterClient
 	}
+	r.uncachedClient = mgr.GetAPIReader()
 
 	return nil
 }
@@ -230,8 +234,19 @@ func (r *KubeadmControlPlaneReconciler) reconcile(ctx context.Context, cluster *
 		return ctrl.Result{}, err
 	}
 
-	// TODO: handle proper adoption of Machines
-	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp.Name))
+	// TODO switch to FilterableMachineCollection
+	adoptableMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.AdoptableControlPlaneMachines(cluster.Name))
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if len(adoptableMachines) > 0 {
+		// We adopt the Machines and then wait for the update event for the ownership reference to re-queue them so the cache is up-to-date
+		err = r.AdoptMachines(ctx, kcp, adoptableMachines...)
+		return ctrl.Result{}, err
+	}
+
+	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp))
 	if err != nil {
 		logger.Error(err, "failed to retrieve control plane machines for cluster")
 		return ctrl.Result{}, err
@@ -274,17 +289,12 @@ func (r *KubeadmControlPlaneReconciler) reconcile(ctx context.Context, cluster *
 }
 
 func (r *KubeadmControlPlaneReconciler) updateStatus(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, cluster *clusterv1.Cluster) error {
-	labelSelector := internal.ControlPlaneSelectorForCluster(cluster.Name)
-	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
-	if err != nil {
-		// Since we are building up the LabelSelector above, this should not fail
-		return errors.Wrap(err, "failed to parse label selector")
-	}
+	selector := internal.ControlPlaneSelectorForCluster(cluster.Name)
 	// Copy label selector to its status counterpart in string format.
 	// This is necessary for CRDs including scale subresources.
 	kcp.Status.Selector = selector.String()
 
-	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp.Name))
+	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp))
 	if err != nil {
 		return errors.Wrap(err, "failed to get list of owned machines")
 	}
@@ -581,14 +591,9 @@ func (r *KubeadmControlPlaneReconciler) failureDomainForScaleDown(cluster *clust
 	if len(cluster.Status.FailureDomains.FilterControlPlane()) == 0 {
 		return nil
 	}
-
-	// See if there are any Machines that are not in currently defined failure domains first.
-	notInFailureDomains := machines.Filter(internal.Not(internal.InFailureDomains(cluster.Status.FailureDomains.FilterControlPlane().GetIDs()...)))
-	if len(notInFailureDomains) > 0 {
-		// return the failure domain for the oldest Machine not in the current list of failure domains
-		// this could be either nil (no failure domain defined) or a failure domain that is no longer defined
-		// in the cluster status.
-		return notInFailureDomains.Oldest().Spec.FailureDomain
+	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp))
+	if err != nil {
+		return nil, err
 	}
 
 	// Otherwise pick the currently known failure domain with the most Machines
@@ -644,7 +649,7 @@ func (r *KubeadmControlPlaneReconciler) reconcileDelete(ctx context.Context, clu
 		logger.Error(err, "failed to retrieve machines for cluster")
 		return ctrl.Result{}, err
 	}
-	ownedMachines := allMachines.Filter(internal.OwnedControlPlaneMachines(kcp.Name))
+	ownedMachines := allMachines.Filter(internal.OwnedControlPlaneMachines(kcp))
 
 	// Verify that only control plane machines remain
 	if len(allMachines) != len(ownedMachines) {
@@ -752,6 +757,58 @@ func (r *KubeadmControlPlaneReconciler) ClusterToKubeadmControlPlane(o handler.M
 		return []ctrl.Request{{NamespacedName: name}}
 	}
 
+	return nil
+}
+
+func (r *KubeadmControlPlaneReconciler) AdoptMachines(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, machines ...*clusterv1.Machine) error {
+	// We do an uncached full quorum read against the KCP to avoid re-adopting Machines the garbage collector just intentionally orphaned
+	// See https://github.com/kubernetes/kubernetes/issues/42639
+	uncached := controlplanev1.KubeadmControlPlane{}
+	err := r.uncachedClient.Get(ctx, client.ObjectKey{Namespace: kcp.Namespace, Name: kcp.Name}, &uncached)
+	if err != nil {
+		return fmt.Errorf("can't recheck DeletionTimestamp: %v", err)
+	}
+	if !uncached.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("%v/%v has just been deleted at %v", kcp.GetNamespace(), kcp.GetName(), kcp.GetDeletionTimestamp())
+	}
+
+	for _, m := range machines {
+		patchHelper, err := patch.NewHelper(m, r.Client)
+		if err != nil {
+			return err
+		}
+
+		m.SetOwnerReferences(util.EnsureOwnerRef(m.GetOwnerReferences(), metav1.OwnerReference{
+			APIVersion:         controlplanev1.GroupVersion.String(),
+			Kind:               "KubeadmControlPlane",
+			Name:               kcp.Name,
+			UID:                kcp.UID,
+			Controller:         pointer.BoolPtr(true),
+			BlockOwnerDeletion: pointer.BoolPtr(true),
+		}))
+
+		// 0. get machine.Spec.Version - the easy answer
+		// 1. hash the version (kubernetes version) and kubeadm_controlplane's Spec.infrastructureTemplate
+		machineKubernetesVersion := ""
+		if m.Spec.Version != nil {
+			machineKubernetesVersion = *m.Spec.Version
+		}
+		// := m.Spec.Version
+
+		newSpec := controlplanev1.KubeadmControlPlaneSpec{
+			Version:                machineKubernetesVersion,
+			InfrastructureTemplate: kcp.Spec.InfrastructureTemplate,
+		}
+		newConfigurationHash := hash.Compute(&newSpec)
+		// 2. add kubeadm.controlplane.cluster.x-k8s.io/hash as a label in each machine
+		m.Labels["kubeadm.controlplane.cluster.x-k8s.io/hash"] = newConfigurationHash
+
+		// Note that ValidateOwnerReferences() will reject this patch if another
+		// OwnerReference exists with controller=true.
+		if err := patchHelper.Patch(ctx, m); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

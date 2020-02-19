@@ -536,6 +536,112 @@ func TestReconcileClusterNoEndpoints(t *testing.T) {
 	g.Expect(machineList.Items).To(BeEmpty())
 }
 
+func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
+	t.Run("adopts existing Machines", func(t *testing.T) {
+		g := NewWithT(t)
+
+		cluster, kcp, tmpl := createClusterWithControlPlane()
+		cluster.Spec.ControlPlaneEndpoint.Host = "foo"
+
+		fmc := &fakeManagementCluster{
+			Machines:            []*clusterv1.Machine{},
+			ControlPlaneHealthy: true,
+			EtcdHealthy:         true,
+		}
+		objs := []runtime.Object{cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
+		for i := 0; i < 3; i++ {
+			m := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      fmt.Sprintf("test-%d", i),
+					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				},
+			}
+			objs = append(objs, m)
+			fmc.Machines = append(fmc.Machines, m)
+		}
+		fakeClient, err := fakeClient(objs...)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		log.SetLogger(klogr.New())
+		r := &KubeadmControlPlaneReconciler{
+			Client:            fakeClient,
+			Log:               log.Log,
+			managementCluster: fmc,
+
+			uncachedClient: fakeClient,
+		}
+
+		g.Expect(r.reconcile(context.Background(), cluster, kcp, log.Log)).To(Equal(ctrl.Result{}))
+
+		machineList := &clusterv1.MachineList{}
+		g.Expect(fakeClient.List(context.Background(), machineList, client.InNamespace(cluster.Namespace))).To(Succeed())
+		g.Expect(machineList.Items).NotTo(BeEmpty())
+		g.Expect(machineList.Items).To(HaveLen(3))
+		for _, machine := range machineList.Items {
+			g.Expect(machine.OwnerReferences).To(HaveLen(1))
+			g.Expect(machine.OwnerReferences).To(ContainElement(*metav1.NewControllerRef(kcp, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane"))))
+			g.Expect(machine.Labels).To(Equal(internal.ControlPlaneLabelsForClusterWithHash(cluster.Name, hash.Compute(&kcp.Spec))))
+		}
+	})
+
+	t.Run("Deleted KubeadmControlPlanes don't adopt machines", func(t *testing.T) {
+		// Usually we won't get into the inner reconcile with a deleted control plane, but it's possible when deleting with "oprhanDependents":
+		// 1. The deletion timestamp is set in the API server, but our cache has not yet updated
+		// 2. The garbage collector removes our ownership reference from a Machine, triggering a re-reconcile (or we get unlucky with the periodic reconciliation)
+		// 3. We get into the inner reconcile function and re-adopt the Machine
+		// 4. The update to our cache for our deletion timestamp arrives
+		g := NewWithT(t)
+
+		cluster, kcp, tmpl := createClusterWithControlPlane()
+		cluster.Spec.ControlPlaneEndpoint.Host = "foo"
+
+		now := metav1.Now()
+		kcp.DeletionTimestamp = &now
+
+		fmc := &fakeManagementCluster{
+			Machines:            []*clusterv1.Machine{},
+			ControlPlaneHealthy: true,
+			EtcdHealthy:         true,
+		}
+		objs := []runtime.Object{cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
+		for i := 0; i < 3; i++ {
+			m := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      fmt.Sprintf("test-%d", i),
+					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				},
+			}
+			objs = append(objs, m)
+			fmc.Machines = append(fmc.Machines, m)
+		}
+		fakeClient, err := fakeClient(objs...)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		log.SetLogger(klogr.New())
+		r := &KubeadmControlPlaneReconciler{
+			Client:            fakeClient,
+			Log:               log.Log,
+			managementCluster: fmc,
+
+			uncachedClient: fakeClient,
+		}
+
+		result, err := r.reconcile(context.Background(), cluster, kcp, log.Log)
+		g.Expect(result).To(Equal(ctrl.Result{}))
+		g.Expect(err).To(HaveOccurred())
+
+		machineList := &clusterv1.MachineList{}
+		g.Expect(fakeClient.List(context.Background(), machineList, client.InNamespace(cluster.Namespace))).To(Succeed())
+		g.Expect(machineList.Items).NotTo(BeEmpty())
+		g.Expect(machineList.Items).To(HaveLen(3))
+		for _, machine := range machineList.Items {
+			g.Expect(machine.OwnerReferences).To(BeEmpty())
+		}
+	})
+}
+
 func TestReconcileInitializeControlPlane(t *testing.T) {
 	g := NewWithT(t)
 
@@ -1203,7 +1309,7 @@ func createClusterWithControlPlane() (*clusterv1.Cluster, *controlplanev1.Kubead
 	return cluster, kcp, genericMachineTemplate
 }
 
-func fakeClient() (client.Client, error) {
+func fakeClient(initObjs ...runtime.Object) (client.Client, error) {
 	if err := clusterv1.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -1213,7 +1319,7 @@ func fakeClient() (client.Client, error) {
 	if err := controlplanev1.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
-	fakeClient := fake.NewFakeClientWithScheme(scheme.Scheme)
+	fakeClient := fake.NewFakeClientWithScheme(scheme.Scheme, initObjs...)
 	return fakeClient, nil
 }
 
@@ -1327,6 +1433,20 @@ type fakeManagementCluster struct {
 }
 
 func (f *fakeManagementCluster) GetMachinesForCluster(ctx context.Context, cluster types.NamespacedName, filters ...internal.MachineFilter) (internal.FilterableMachineCollection, error) {
+	// TODO panic on non-empty filters instead
+	ret := make([]*clusterv1.Machine, 0, len(f.Machines))
+	for _, m := range f.Machines {
+		if func() bool {
+			for _, f := range filters {
+				if !f(m) {
+					return false
+				}
+			}
+			return true
+		}() {
+			ret = append(ret, m)
+		}
+	}
 	return f.Machines, nil
 }
 

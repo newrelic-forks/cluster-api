@@ -18,6 +18,7 @@ package internal
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
@@ -83,8 +84,8 @@ func InFailureDomains(failureDomains ...*string) MachineFilter {
 }
 
 // OwnedControlPlaneMachines returns a MachineFilter function to find all owned control plane machines.
-// Usage: managementCluster.GetMachinesForCluster(ctx, cluster, OwnedControlPlaneMachines(controlPlane.Name))
-func OwnedControlPlaneMachines(controlPlaneName string) MachineFilter {
+// Usage: managementCluster.GetMachinesForCluster(ctx, cluster, OwnedControlPlaneMachines(controlPlane))
+func OwnedControlPlaneMachines(owner metav1.Object) func(machine *clusterv1.Machine) bool {
 	return func(machine *clusterv1.Machine) bool {
 		if machine == nil {
 			return false
@@ -93,8 +94,49 @@ func OwnedControlPlaneMachines(controlPlaneName string) MachineFilter {
 		if controllerRef == nil {
 			return false
 		}
-		return controllerRef.Kind == "KubeadmControlPlane" && controllerRef.Name == controlPlaneName
+		return controllerRef.Kind == "KubeadmControlPlane" && controllerRef.Name == owner.GetName() && controllerRef.UID == owner.GetUID()
 	}
+}
+
+func ControlPlaneMachines(clusterName string) func(machine *clusterv1.Machine) bool {
+	selector := ControlPlaneSelectorForCluster(clusterName)
+	return func(machine *clusterv1.Machine) bool {
+		if machine == nil {
+			return false
+		}
+		return selector.Matches(labels.Set(machine.Labels))
+	}
+}
+
+// AdoptableControlPlaneMachines returns a MachineFilter function to find all un-controlled control plane machines.
+// Usage: managementCluster.GetMachinesForCluster(ctx, cluster, AdoptableControlPlaneMachines(cluster.Name, controlPlane))
+func AdoptableControlPlaneMachines(clusterName string) func(machine *clusterv1.Machine) bool {
+	type ftype func(*clusterv1.Machine) bool
+	and := func(fs ...ftype) ftype {
+		return func(machine *clusterv1.Machine) bool {
+			for _, f := range fs {
+				if !f(machine) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	notNil := func(machine *clusterv1.Machine) bool {
+		return machine != nil
+	}
+	// Check that KubeadmConfig exists to has Spec.Version later
+	// refersToKubeadmConfig := func(machine *clusterv1.Machine) bool {
+	// 	return machine.Spec.Bootstrap.ConfigRef.Kind == "KubeadmConfig"
+	// }
+	return and(
+		notNil,
+		// refersToKubeadmConfig,
+		ControlPlaneMachines(clusterName),
+		func(machine *clusterv1.Machine) bool {
+			return metav1.GetControllerOf(machine) == nil
+		},
+	)
 }
 
 // HasDeletionTimestamp is a MachineFilter to find all machines

@@ -92,6 +92,21 @@ func (m *ManagementCluster) getCluster(ctx context.Context, clusterKey types.Nam
 	}, nil
 }
 
+// GetKubeadmConfigmap gets the kubeadm ConfigMap
+func (m *ManagementCluster) GetKubeadmConfigmap(ctx context.Context, clusterKey types.NamespacedName) (*corev1.ConfigMap, error) {
+	cluster, err := m.getCluster(ctx, clusterKey)
+	if err != nil {
+		return nil, err
+	}
+
+	original := &corev1.ConfigMap{}
+	if err := cluster.client.Get(ctx, types.NamespacedName{Name: "kubeadm-config", Namespace: metav1.NamespaceSystem}, original); err != nil {
+		return nil, err
+	}
+
+	return original, err
+}
+
 // GetEtcdCerts returns the EtcdCA Cert and Key for a given cluster.
 func (m *ManagementCluster) GetEtcdCerts(ctx context.Context, cluster types.NamespacedName) ([]byte, []byte, error) {
 	etcdCASecret := &corev1.Secret{}
@@ -133,7 +148,7 @@ func (m *ManagementCluster) healthCheck(ctx context.Context, check healthCheck, 
 	}
 
 	// Make sure Cluster API is aware of all the nodes.
-	machines, err := m.GetMachinesForCluster(ctx, clusterKey, OwnedControlPlaneMachines(controlPlaneName))
+	machines, err := m.GetMachinesForCluster(ctx, clusterKey, ControlPlaneMachines(clusterKey.Name))
 	if err != nil {
 		return err
 	}

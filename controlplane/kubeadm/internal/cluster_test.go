@@ -159,8 +159,8 @@ func TestGetMachinesForCluster(t *testing.T) {
 		t.Fatalf("expected 3 machines but found %d", len(machines))
 	}
 
-	// Test the OwnedControlPlaneMachines works
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"))
+	// Test the ControlPlaneMachines works
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	nameFilter := func(cluster *clusterv1.Machine) bool {
 		return cluster.Name == "first-machine"
 	}
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"), nameFilter)
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"), nameFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
