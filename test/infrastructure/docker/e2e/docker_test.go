@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -57,6 +58,7 @@ var _ = Describe("Docker", func() {
 		})
 
 		AfterEach(func() {
+			By("cleaning up the test cluster")
 			// Dump cluster API and docker related resources to artifacts before deleting them.
 			Expect(framework.DumpResources(mgmt, resourcesPath, GinkgoWriter)).To(Succeed())
 			resources := map[string]runtime.Object{
@@ -147,7 +149,7 @@ var _ = Describe("Docker", func() {
 				}
 				framework.WaitForOneKubeadmControlPlaneMachineToExist(ctx, waitForOneKubeadmControlPlaneMachineToExistInput)
 
-				// Insatll a networking solution on the workload cluster
+				// Install a networking solution on the workload cluster
 				workloadClient, err := mgmt.GetWorkloadClient(ctx, cluster.Namespace, cluster.Name)
 				Expect(err).ToNot(HaveOccurred())
 				applyYAMLURLInput := framework.ApplyYAMLURLInput{
@@ -235,6 +237,159 @@ var _ = Describe("Docker", func() {
 					}
 					return upgraded, nil
 				}, "10m", "30s").Should(Equal(int(*controlPlane.Spec.Replicas)))
+			})
+		})
+
+		Describe("Controlplane Adoption", func() {
+			Specify("KubeadmControlPlane adopts up-to-date control plane Machines without modification", func() {
+				var (
+					controlPlane *controlplanev1.KubeadmControlPlane
+					infraCluster *infrav1.DockerCluster
+					template     *infrav1.DockerMachineTemplate
+					err          error
+				)
+				replicas := 1 /* TODO: can't seem to get CAPD to bootstrap a cluster with more than one control plane machine */
+				cluster, infraCluster, controlPlane, template = clusterGen.GenerateCluster(namespace, int32(replicas))
+				controlPlaneRef := cluster.Spec.ControlPlaneRef
+				cluster.Spec.ControlPlaneRef = nil
+
+				// Set up the client to the management cluster
+				client, err = mgmt.GetClient()
+				Expect(err).NotTo(HaveOccurred())
+
+				// Set up the cluster object
+				createClusterInput := framework.CreateClusterInput{
+					Creator:      client,
+					Cluster:      cluster,
+					InfraCluster: infraCluster,
+				}
+				framework.CreateCluster(ctx, createClusterInput)
+
+				version := "1.16.3"
+
+				// Wait for the cluster to provision.
+				assertClusterProvisionsInput := framework.WaitForClusterToProvisionInput{
+					Getter:  client,
+					Cluster: cluster,
+				}
+				framework.WaitForClusterToProvision(ctx, assertClusterProvisionsInput)
+
+				initMachines, bootstrap, infra := generateControlPlaneMachines(cluster, namespace, version, replicas)
+				for i := 0; i < len(initMachines); i++ {
+					// we have to go one at a time, otherwise weird things start to happen
+					By("initializing control plane machines")
+					createMachineInput := framework.CreateMachineInput{
+						Creator:         client,
+						BootstrapConfig: bootstrap[i],
+						InfraMachine:    infra[i],
+						Machine:         initMachines[i],
+					}
+					framework.CreateMachine(ctx, createMachineInput)
+
+					// Wait for the first control plane machine to boot
+					assertMachinesProvisionInput := framework.WaitForMachineNodesToExistInput{
+						Getter:   client,
+						Machines: initMachines[i : i+1],
+					}
+					framework.WaitForMachineNodesToExist(ctx, assertMachinesProvisionInput)
+
+					if i == 0 {
+						// Install a networking solution on the workload cluster
+						workloadClient, err := mgmt.GetWorkloadClient(ctx, cluster.Namespace, cluster.Name)
+						Expect(err).ToNot(HaveOccurred())
+						applyYAMLURLInput := framework.ApplyYAMLURLInput{
+							Client:        workloadClient,
+							HTTPGetter:    http.DefaultClient,
+							NetworkingURL: "https://docs.projectcalico.org/manifests/calico.yaml",
+							Scheme:        mgmt.Scheme,
+						}
+						framework.ApplyYAMLURL(ctx, applyYAMLURLInput)
+					}
+				}
+
+				// Set up the KubeadmControlPlane
+				createKubeadmControlPlaneInput := framework.CreateKubeadmControlPlaneInput{
+					Creator:         client,
+					ControlPlane:    controlPlane,
+					MachineTemplate: template,
+				}
+				framework.CreateKubeadmControlPlane(ctx, createKubeadmControlPlaneInput)
+
+				// We have to set the control plane ref on the cluster as well
+				cl := &clusterv1.Cluster{}
+				client.Get(ctx, ctrlclient.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, cl)
+				cl.Spec.ControlPlaneRef = controlPlaneRef
+				Expect(client.Update(ctx, cl)).To(Succeed())
+
+				waitForControlPlaneToBeUpToDateInput := framework.WaitForControlPlaneToBeUpToDateInput{
+					Getter:       client,
+					ControlPlane: controlPlane,
+				}
+				framework.WaitForControlPlaneToBeUpToDate(ctx, waitForControlPlaneToBeUpToDateInput)
+
+				machines := clusterv1.MachineList{}
+				Expect(client.List(ctx, &machines,
+					ctrlclient.InNamespace(namespace),
+					ctrlclient.HasLabels{
+						clusterv1.MachineControlPlaneLabelName,
+					})).To(Succeed())
+
+				By("taking stable ownership of the Machines")
+				for _, m := range machines.Items {
+					Expect(&m).To(HaveControllerRef(framework.TypeToKind(controlPlane), controlPlane))
+					Expect(m.CreationTimestamp.Time).To(BeTemporally("<", controlPlane.CreationTimestamp.Time))
+				}
+				Expect(machines.Items).To(HaveLen(1))
+
+				By("taking ownership of the cluster's PKI material")
+				secrets := corev1.SecretList{}
+				Expect(client.List(ctx, &secrets, ctrlclient.InNamespace(namespace), ctrlclient.MatchingLabels{
+					clusterv1.ClusterLabelName: cluster.Name,
+				})).To(Succeed())
+
+				for _, s := range secrets.Items {
+					// We don't check the data, and removing it from the object makes assertions much easier to read
+					s.Data = nil
+
+					// The bootstrap secret should still be owned by the bootstrap config so its cleaned up properly,
+					// but the cluster PKI materials should have their ownership transferred.
+					switch {
+					case strings.HasSuffix(s.Name, "-kubeconfig"):
+						// Do nothing
+					case strings.HasPrefix(s.Name, "bootstrap-"):
+						fi := -1
+						for i, b := range bootstrap {
+							if s.Name == b.Name {
+								fi = i
+							}
+						}
+						Expect(fi).To(BeNumerically(">=", 0), "could not find matching bootstrap object for Secret %s", s.Name)
+						Expect(&s).To(HaveControllerRef(framework.TypeToKind(bootstrap[fi]), bootstrap[fi]))
+					default:
+						Expect(&s).To(HaveControllerRef(framework.TypeToKind(controlPlane), controlPlane))
+					}
+				}
+				Expect(secrets.Items).To(HaveLen(4 /* pki */ + 1 /* kubeconfig */ + int(replicas)))
+
+				By("ensuring we can still join machines after the adoption")
+				md, infraTemplate, bootstrapTemplate := GenerateMachineDeployment(cluster, 1)
+
+				// Create the workload nodes
+				createMachineDeploymentinput := framework.CreateMachineDeploymentInput{
+					Creator:                 client,
+					MachineDeployment:       md,
+					BootstrapConfigTemplate: bootstrapTemplate,
+					InfraMachineTemplate:    infraTemplate,
+				}
+				framework.CreateMachineDeployment(ctx, createMachineDeploymentinput)
+
+				// Wait for the workload nodes to exist
+				waitForMachineDeploymentNodesToExistInput := framework.WaitForMachineDeploymentNodesToExistInput{
+					Lister:            client,
+					Cluster:           cluster,
+					MachineDeployment: md,
+				}
+				framework.WaitForMachineDeploymentNodesToExist(ctx, waitForMachineDeploymentNodesToExistInput)
 			})
 		})
 	})
@@ -380,4 +535,66 @@ func (c *ClusterGenerator) GenerateCluster(namespace string, replicas int32) (*c
 		},
 	}
 	return cluster, infraCluster, kcp, template
+}
+
+func generateControlPlaneMachines(cluster *clusterv1.Cluster, namespace, version string, replicas int) ([]*clusterv1.Machine, []*bootstrapv1.KubeadmConfig, []*infrav1.DockerMachine) {
+	machines := make([]*clusterv1.Machine, 0, replicas)
+	bootstrap := make([]*bootstrapv1.KubeadmConfig, 0, replicas)
+	infra := make([]*infrav1.DockerMachine, 0, replicas)
+	for i := 0; i < replicas; i++ {
+		bootstrap = append(bootstrap, &bootstrapv1.KubeadmConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+				Name:      fmt.Sprintf("bootstrap-controlplane-%d", i),
+			},
+			Spec: bootstrapv1.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					APIServer: v1beta1.APIServer{
+						// Darwin support
+						CertSANs: []string{"127.0.0.1"},
+					},
+				},
+				InitConfiguration: &v1beta1.InitConfiguration{},
+				JoinConfiguration: &v1beta1.JoinConfiguration{},
+			},
+		})
+
+		infra = append(infra, &infrav1.DockerMachine{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+				Name:      fmt.Sprintf("controlplane-%d-infra", i),
+			},
+			Spec: infrav1.DockerMachineSpec{},
+		})
+
+		machines = append(machines, &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+				Name:      fmt.Sprintf("controlplane-%d", i),
+				Labels: map[string]string{
+					clusterv1.MachineControlPlaneLabelName: "true",
+				},
+			},
+			Spec: clusterv1.MachineSpec{
+				ClusterName: cluster.GetName(),
+				Bootstrap: clusterv1.Bootstrap{
+					ConfigRef: &corev1.ObjectReference{
+						APIVersion: bootstrapv1.GroupVersion.String(),
+						Kind:       framework.TypeToKind(bootstrap[i]),
+						Namespace:  bootstrap[i].GetNamespace(),
+						Name:       bootstrap[i].GetName(),
+					},
+				},
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: infrav1.GroupVersion.String(),
+					Kind:       framework.TypeToKind(infra[i]),
+					Namespace:  infra[i].GetNamespace(),
+					Name:       infra[i].GetName(),
+				},
+				Version: &version,
+			},
+		})
+	}
+
+	return machines, bootstrap, infra
 }

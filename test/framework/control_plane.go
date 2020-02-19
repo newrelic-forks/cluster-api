@@ -23,10 +23,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -130,67 +128,6 @@ func CreateKubeadmControlPlane(ctx context.Context, input CreateKubeadmControlPl
 	}, intervals...).Should(Succeed())
 }
 
-// CreateMachineDeploymentInput is the input for CreateMachineDeployment.
-type CreateMachineDeploymentInput struct {
-	Creator                 Creator
-	MachineDeployment       *clusterv1.MachineDeployment
-	BootstrapConfigTemplate runtime.Object
-	InfraMachineTemplate    runtime.Object
-}
-
-// CreateMachineDeployment creates the machine deployment and dependencies.
-func CreateMachineDeployment(ctx context.Context, input CreateMachineDeploymentInput) {
-	By("creating a core MachineDeployment resource")
-	Expect(input.Creator.Create(ctx, input.MachineDeployment)).To(Succeed())
-
-	By("creating a BootstrapConfigTemplate resource")
-	Expect(input.Creator.Create(ctx, input.BootstrapConfigTemplate)).To(Succeed())
-
-	By("creating an InfrastructureMachineTemplate resource")
-	Expect(input.Creator.Create(ctx, input.InfraMachineTemplate)).To(Succeed())
-}
-
-// WaitForMachineDeploymentNodesToExistInput is the input for WaitForMachineDeploymentNodesToExist.
-type WaitForMachineDeploymentNodesToExistInput struct {
-	Lister            Lister
-	Cluster           *clusterv1.Cluster
-	MachineDeployment *clusterv1.MachineDeployment
-}
-
-// WaitForMachineDeploymentNodesToExist waits until all nodes associated with a machine deployment exist.
-func WaitForMachineDeploymentNodesToExist(ctx context.Context, input WaitForMachineDeploymentNodesToExistInput, intervals ...interface{}) {
-	By("waiting for the workload nodes to exist")
-	Eventually(func() (int, error) {
-		selectorMap, err := metav1.LabelSelectorAsMap(&input.MachineDeployment.Spec.Selector)
-		if err != nil {
-			return 0, err
-		}
-		ms := &clusterv1.MachineSetList{}
-		if err := input.Lister.List(ctx, ms, client.InNamespace(input.Cluster.Namespace), client.MatchingLabels(selectorMap)); err != nil {
-			return 0, err
-		}
-		if len(ms.Items) == 0 {
-			return 0, errors.New("no machinesets were found")
-		}
-		machineSet := ms.Items[0]
-		selectorMap, err = metav1.LabelSelectorAsMap(&machineSet.Spec.Selector)
-		if err != nil {
-			return 0, err
-		}
-		machines := &clusterv1.MachineList{}
-		if err := input.Lister.List(ctx, machines, client.InNamespace(machineSet.Namespace), client.MatchingLabels(selectorMap)); err != nil {
-			return 0, err
-		}
-		count := 0
-		for _, machine := range machines.Items {
-			if machine.Status.NodeRef != nil {
-				count++
-			}
-		}
-		return count, nil
-	}, intervals...).Should(Equal(int(*input.MachineDeployment.Spec.Replicas)))
-}
-
 // WaitForClusterToProvisionInput is the input for WaitForClusterToProvision.
 type WaitForClusterToProvisionInput struct {
 	Getter  Getter
@@ -225,14 +162,16 @@ func WaitForKubeadmControlPlaneMachinesToExist(ctx context.Context, input WaitFo
 	By("waiting for all control plane nodes to exist")
 	inClustersNamespaceListOption := client.InNamespace(input.Cluster.Namespace)
 	// ControlPlane labels
+	matchControlPlaneListOption := client.HasLabels{
+		clusterv1.MachineControlPlaneLabelName,
+	}
 	matchClusterListOption := client.MatchingLabels{
-		clusterv1.MachineControlPlaneLabelName: "",
-		clusterv1.ClusterLabelName:             input.Cluster.Name,
+		clusterv1.ClusterLabelName: input.Cluster.Name,
 	}
 
 	Eventually(func() (int, error) {
 		machineList := &clusterv1.MachineList{}
-		if err := input.Lister.List(ctx, machineList, inClustersNamespaceListOption, matchClusterListOption); err != nil {
+		if err := input.Lister.List(ctx, machineList, inClustersNamespaceListOption, matchControlPlaneListOption, matchClusterListOption); err != nil {
 			fmt.Println(err)
 			return 0, err
 		}
@@ -301,6 +240,28 @@ func WaitForControlPlaneToBeReady(ctx context.Context, input WaitForControlPlane
 		}
 		return controlplane.Status.Ready, nil
 	}, intervals...).Should(BeTrue())
+}
+
+// WaitForControlPlaneToBeReadyInput is the input for WaitForControlPlaneToBeReady.
+type WaitForControlPlaneToBeUpToDateInput struct {
+	Getter       Getter
+	ControlPlane *controlplanev1.KubeadmControlPlane
+}
+
+// WaitForControlPlaneToBeUpToDate will wait for a control plane to be fully up-to-date.
+func WaitForControlPlaneToBeUpToDate(ctx context.Context, input WaitForControlPlaneToBeUpToDateInput, intervals ...interface{}) {
+	By("waiting for the control plane to be ready")
+	Eventually(func() (int32, error) {
+		controlplane := &controlplanev1.KubeadmControlPlane{}
+		key := client.ObjectKey{
+			Namespace: input.ControlPlane.GetNamespace(),
+			Name:      input.ControlPlane.GetName(),
+		}
+		if err := input.Getter.Get(ctx, key, controlplane); err != nil {
+			return 0, err
+		}
+		return controlplane.Status.UpdatedReplicas, nil
+	}, intervals...).Should(Equal(*input.ControlPlane.Spec.Replicas))
 }
 
 // DeleteClusterInput is the input for DeleteCluster.

@@ -37,8 +37,8 @@ import (
 // ManagementCluster defines all behaviors necessary for something to function as a management cluster.
 type ManagementCluster interface {
 	GetMachinesForCluster(ctx context.Context, cluster client.ObjectKey, filters ...MachineFilter) (FilterableMachineCollection, error)
-	TargetClusterEtcdIsHealthy(ctx context.Context, clusterKey client.ObjectKey, controlPlaneName string) error
-	TargetClusterControlPlaneIsHealthy(ctx context.Context, clusterKey client.ObjectKey, controlPlaneName string) error
+	TargetClusterEtcdIsHealthy(ctx context.Context, clusterKey client.ObjectKey) error
+	TargetClusterControlPlaneIsHealthy(ctx context.Context, clusterKey client.ObjectKey) error
 	GetWorkloadCluster(ctx context.Context, clusterKey client.ObjectKey) (WorkloadCluster, error)
 }
 
@@ -119,7 +119,7 @@ type healthCheck func(context.Context) (HealthCheckResult, error)
 
 // HealthCheck will run a generic health check function and report any errors discovered.
 // In addition to the health check, it also ensures there is a 1;1 match between nodes and machines.
-func (m *Management) healthCheck(ctx context.Context, check healthCheck, clusterKey client.ObjectKey, controlPlaneName string) error {
+func (m *Management) healthCheck(ctx context.Context, check healthCheck, clusterKey client.ObjectKey) error {
 	var errorList []error
 	nodeChecks, err := check(ctx)
 	if err != nil {
@@ -135,7 +135,7 @@ func (m *Management) healthCheck(ctx context.Context, check healthCheck, cluster
 	}
 
 	// Make sure Cluster API is aware of all the nodes.
-	machines, err := m.GetMachinesForCluster(ctx, clusterKey, OwnedControlPlaneMachines(controlPlaneName))
+	machines, err := m.GetMachinesForCluster(ctx, clusterKey, ControlPlaneMachines(clusterKey.Name))
 	if err != nil {
 		return err
 	}
@@ -157,21 +157,21 @@ func (m *Management) healthCheck(ctx context.Context, check healthCheck, cluster
 }
 
 // TargetClusterControlPlaneIsHealthy checks every node for control plane health.
-func (m *Management) TargetClusterControlPlaneIsHealthy(ctx context.Context, clusterKey client.ObjectKey, controlPlaneName string) error {
+func (m *Management) TargetClusterControlPlaneIsHealthy(ctx context.Context, clusterKey client.ObjectKey) error {
 	// TODO: add checks for expected taints/labels
 	cluster, err := m.GetWorkloadCluster(ctx, clusterKey)
 	if err != nil {
 		return err
 	}
-	return m.healthCheck(ctx, cluster.ControlPlaneIsHealthy, clusterKey, controlPlaneName)
+	return m.healthCheck(ctx, cluster.ControlPlaneIsHealthy, clusterKey)
 }
 
 // TargetClusterEtcdIsHealthy runs a series of checks over a target cluster's etcd cluster.
 // In addition, it verifies that there are the same number of etcd members as control plane Machines.
-func (m *Management) TargetClusterEtcdIsHealthy(ctx context.Context, clusterKey client.ObjectKey, controlPlaneName string) error {
+func (m *Management) TargetClusterEtcdIsHealthy(ctx context.Context, clusterKey client.ObjectKey) error {
 	cluster, err := m.GetWorkloadCluster(ctx, clusterKey)
 	if err != nil {
 		return err
 	}
-	return m.healthCheck(ctx, cluster.EtcdIsHealthy, clusterKey, controlPlaneName)
+	return m.healthCheck(ctx, cluster.EtcdIsHealthy, clusterKey)
 }

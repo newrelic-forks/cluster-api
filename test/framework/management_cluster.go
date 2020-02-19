@@ -116,7 +116,7 @@ func InitManagementCluster(ctx context.Context, input *InitManagementClusterInpu
 		for _, waiter := range component.Waiters {
 			switch waiter.Type {
 			case PodsWaiter:
-				WaitForPodsReadyInNamespace(ctx, managementCluster, waiter.Value)
+				WaitForDeploymentsInNamespace(ctx, managementCluster, waiter.Value)
 			case ServiceWaiter:
 				WaitForAPIServiceAvailable(ctx, managementCluster, waiter.Value)
 			}

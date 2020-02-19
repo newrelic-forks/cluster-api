@@ -45,14 +45,14 @@ func (f *fakeManagementCluster) GetMachinesForCluster(c context.Context, n clien
 	return f.Machines, nil
 }
 
-func (f *fakeManagementCluster) TargetClusterControlPlaneIsHealthy(_ context.Context, _ client.ObjectKey, _ string) error {
+func (f *fakeManagementCluster) TargetClusterControlPlaneIsHealthy(_ context.Context, _ client.ObjectKey) error {
 	if !f.ControlPlaneHealthy {
 		return errors.New("control plane is not healthy")
 	}
 	return nil
 }
 
-func (f *fakeManagementCluster) TargetClusterEtcdIsHealthy(_ context.Context, _ client.ObjectKey, _ string) error {
+func (f *fakeManagementCluster) TargetClusterEtcdIsHealthy(_ context.Context, _ client.ObjectKey) error {
 	if !f.EtcdHealthy {
 		return errors.New("etcd is not healthy")
 	}

@@ -164,8 +164,8 @@ func TestGetMachinesForCluster(t *testing.T) {
 		t.Fatalf("expected 3 machines but found %d", len(machines))
 	}
 
-	// Test the OwnedControlPlaneMachines works
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"))
+	// Test the ControlPlaneMachines works
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	nameFilter := func(cluster *clusterv1.Machine) bool {
 		return cluster.Name == "first-machine"
 	}
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"), nameFilter)
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"), nameFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,8 +316,7 @@ func TestManagementCluster_healthCheck_NoError(t *testing.T) {
 					"three": nil,
 				}, nil
 			},
-			clusterKey:       client.ObjectKey{Namespace: "default", Name: "cluster-name"},
-			controlPlaneName: "control-plane-name",
+			clusterKey: client.ObjectKey{Namespace: "default", Name: "cluster-name"},
 		},
 	}
 	for _, tt := range tests {
@@ -326,7 +325,7 @@ func TestManagementCluster_healthCheck_NoError(t *testing.T) {
 			m := &Management{
 				Client: &fakeClient{list: tt.machineList},
 			}
-			if err := m.healthCheck(ctx, tt.check, tt.clusterKey, tt.controlPlaneName); err != nil {
+			if err := m.healthCheck(ctx, tt.check, tt.clusterKey); err != nil {
 				t.Fatal("did not expect an error?")
 			}
 		})
@@ -432,12 +431,11 @@ func TestManagementCluster_healthCheck_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			clusterKey := client.ObjectKey{Namespace: "default", Name: "cluster-name"}
-			controlPlaneName := "control-plane-name"
 
 			m := &Management{
 				Client: &fakeClient{list: tt.machineList},
 			}
-			err := m.healthCheck(ctx, tt.check, clusterKey, controlPlaneName)
+			err := m.healthCheck(ctx, tt.check, clusterKey)
 			if err == nil {
 				t.Fatal("Expected an error")
 			}

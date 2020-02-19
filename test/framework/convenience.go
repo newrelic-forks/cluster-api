@@ -57,12 +57,13 @@ func WaitForAPIServiceAvailable(ctx context.Context, mgmt Waiter, serviceName st
 	Expect(err).NotTo(HaveOccurred(), "stack: %+v", err)
 }
 
-// WaitForPodsReadyInNamespace will wait for all pods to be Ready in the
+// WaitForDeploymentsInNamespace will wait for all deployments to be Available in the
 // specified namespace.
-// For example, kubectl wait --for=condition=Ready --timeout=300s --namespace capi-system pods --all
-func WaitForPodsReadyInNamespace(ctx context.Context, cluster Waiter, namespace string) {
-	By(fmt.Sprintf("waiting for pods to be ready in namespace %q", namespace))
-	err := cluster.Wait(ctx, "--for", "condition=Ready", "--timeout", "300s", "--namespace", namespace, "pods", "--all")
+// For example, kubectl wait --for=condition=Available --timeout=300s --namespace capi-system deployments --all
+func WaitForDeploymentsInNamespace(ctx context.Context, cluster Waiter, namespace string) {
+	By(fmt.Sprintf("waiting for deployments to be available in namespace %q", namespace))
+
+	err := cluster.Wait(ctx, "--for", "condition=Available", "--timeout", "300s", "--namespace", namespace, "deployments", "--all")
 	Expect(err).NotTo(HaveOccurred(), "stack: %+v", err)
 }
 

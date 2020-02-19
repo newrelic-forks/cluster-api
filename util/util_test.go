@@ -21,8 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/blang/semver"
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -505,4 +505,72 @@ func TestEnsureOwnerRef(t *testing.T) {
 		g.Expect(obj.OwnerReferences).Should(ContainElement(ref))
 		g.Expect(obj.OwnerReferences).Should(HaveLen(1))
 	})
+}
+
+func TestIsSupportedVersionSkew(t *testing.T) {
+	type args struct {
+		a semver.Version
+		b semver.Version
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "same version",
+			args: args{
+				a: semver.MustParse("1.10.0"),
+				b: semver.MustParse("1.10.0"),
+			},
+			want: true,
+		},
+		{
+			name: "different patch version",
+			args: args{
+				a: semver.MustParse("1.10.0"),
+				b: semver.MustParse("1.10.2"),
+			},
+			want: true,
+		},
+		{
+			name: "a + 1 minor version",
+			args: args{
+				a: semver.MustParse("1.11.0"),
+				b: semver.MustParse("1.10.2"),
+			},
+			want: true,
+		},
+		{
+			name: "b + 1 minor version",
+			args: args{
+				a: semver.MustParse("1.10.0"),
+				b: semver.MustParse("1.11.2"),
+			},
+			want: true,
+		},
+		{
+			name: "a + 2 minor versions",
+			args: args{
+				a: semver.MustParse("1.12.0"),
+				b: semver.MustParse("1.10.0"),
+			},
+			want: false,
+		},
+		{
+			name: "b + 2 minor versions",
+			args: args{
+				a: semver.MustParse("1.10.0"),
+				b: semver.MustParse("1.12.0"),
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSupportedVersionSkew(tt.args.a, tt.args.b); got != tt.want {
+				t.Errorf("IsSupportedVersionSkew() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

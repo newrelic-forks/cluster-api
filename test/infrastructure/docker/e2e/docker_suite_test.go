@@ -125,6 +125,10 @@ var _ = AfterSuite(func() {
 })
 
 func writeLogs(mgmt *CAPDCluster, namespace, deploymentName, logDir string) error {
+	if mgmt == nil {
+		return nil
+	}
+
 	c, err := mgmt.GetClient()
 	if err != nil {
 		return err
