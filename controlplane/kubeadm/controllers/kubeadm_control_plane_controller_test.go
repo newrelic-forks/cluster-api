@@ -379,11 +379,12 @@ func TestKubeadmControlPlaneReconciler_initializeControlPlane(t *testing.T) {
 	)
 
 	r := &KubeadmControlPlaneReconciler{
-		Client: fakeClient,
-		Log:    log.Log,
+		Client:   fakeClient,
+		Log:      log.Log,
+		recorder: record.NewFakeRecorder(32),
 	}
 
-	result, err := r.initializeControlPlane(context.Background(), cluster, kcp)
+	result, err := r.initializeControlPlane(context.Background(), cluster, kcp, r.Log)
 	g.Expect(result).To(Equal(ctrl.Result{Requeue: true}))
 	g.Expect(err).NotTo(HaveOccurred())
 
@@ -1282,7 +1283,7 @@ func TestKubeadmControlPlaneReconciler_reconcileDelete(t *testing.T) {
 		}
 
 		result, err := r.reconcileDelete(context.Background(), cluster, kcp, log.Log)
-		g.Expect(result).To(Equal(ctrl.Result{Requeue: true}))
+		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: DeleteRequeueAfter}))
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(kcp.Finalizers).To(ContainElement(controlplanev1.KubeadmControlPlaneFinalizer))
 
@@ -1365,9 +1366,11 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 		r := &KubeadmControlPlaneReconciler{
 			Client:            fakeClient,
 			managementCluster: fmc,
+			Log:               log.Log,
+			recorder:          record.NewFakeRecorder(32),
 		}
 
-		result, err := r.scaleUpControlPlane(context.Background(), cluster, kcp, fmc.Machines.DeepCopy())
+		result, err := r.scaleUpControlPlane(context.Background(), cluster, kcp, fmc.Machines.DeepCopy(), r.Log)
 		g.Expect(result).To(Equal(ctrl.Result{Requeue: true}))
 		g.Expect(err).ToNot(HaveOccurred())
 
@@ -1382,19 +1385,21 @@ func TestKubeadmControlPlaneReconciler_scaleUpControlPlane(t *testing.T) {
 
 		r := &KubeadmControlPlaneReconciler{
 			managementCluster: fmc,
+			Log:               log.Log,
+			recorder:          record.NewFakeRecorder(32),
 		}
 
 		fmc.ControlPlaneHealthy = true
 		fmc.EtcdHealthy = false
-		result, err := r.scaleUpControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy())
+		result, err := r.scaleUpControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy(), r.Log)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: HealthCheckFailedRequeueAfter}))
-		g.Expect(err).To(HaveOccurred())
 
 		fmc.ControlPlaneHealthy = false
 		fmc.EtcdHealthy = true
-		result, err = r.scaleUpControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy())
+		result, err = r.scaleUpControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy(), r.Log)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: HealthCheckFailedRequeueAfter}))
-		g.Expect(err).To(HaveOccurred())
 
 	})
 }
@@ -1424,11 +1429,13 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane(t *testing.T) {
 		r := &KubeadmControlPlaneReconciler{
 			Client:            fakeClient,
 			managementCluster: fmc,
+			Log:               log.Log,
+			recorder:          record.NewFakeRecorder(32),
 		}
 
 		fmc.ControlPlaneHealthy = true
 		fmc.EtcdHealthy = true
-		result, err := r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy())
+		result, err := r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy(), r.Log)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(result).To(Equal(ctrl.Result{Requeue: true}))
 
@@ -1460,22 +1467,24 @@ func TestKubeadmControlPlaneReconciler_scaleDownControlPlane(t *testing.T) {
 		r := &KubeadmControlPlaneReconciler{
 			Client:            fakeClient,
 			managementCluster: fmc,
+			Log:               log.Log,
+			recorder:          record.NewFakeRecorder(32),
 		}
 
 		controlPlaneMachines := clusterv1.MachineList{}
 
 		fmc.ControlPlaneHealthy = false
 		fmc.EtcdHealthy = true
-		result, err := r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy())
-		g.Expect(err).To(HaveOccurred())
+		result, err := r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy(), r.Log)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: HealthCheckFailedRequeueAfter}))
 		g.Expect(fakeClient.List(context.Background(), &controlPlaneMachines)).To(Succeed())
 		g.Expect(controlPlaneMachines.Items).To(HaveLen(2))
 
 		fmc.ControlPlaneHealthy = true
 		fmc.EtcdHealthy = false
-		result, err = r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy())
-		g.Expect(err).To(HaveOccurred())
+		result, err = r.scaleDownControlPlane(context.Background(), &clusterv1.Cluster{}, &controlplanev1.KubeadmControlPlane{}, fmc.Machines.DeepCopy(), r.Log)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: HealthCheckFailedRequeueAfter}))
 		g.Expect(fakeClient.List(context.Background(), &controlPlaneMachines)).To(Succeed())
 		g.Expect(controlPlaneMachines.Items).To(HaveLen(2))
