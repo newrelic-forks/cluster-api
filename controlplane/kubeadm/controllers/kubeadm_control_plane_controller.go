@@ -243,7 +243,7 @@ func (r *KubeadmControlPlaneReconciler) reconcile(ctx context.Context, cluster *
 
 	if len(adoptableMachines) > 0 {
 		// We adopt the Machines and then wait for the update event for the ownership reference to re-queue them so the cache is up-to-date
-		err = r.AdoptMachines(ctx, kcp, adoptableMachines...)
+		err = r.AdoptMachines(ctx, kcp, adoptableMachines)
 		return ctrl.Result{}, err
 	}
 
@@ -337,7 +337,7 @@ func (r *KubeadmControlPlaneReconciler) updateStatus(ctx context.Context, kcp *c
 
 func (r *KubeadmControlPlaneReconciler) upgradeControlPlane(ctx context.Context, cluster *clusterv1.Cluster, kcp *controlplanev1.KubeadmControlPlane, logger logr.Logger) (ctrl.Result, error) {
 	// TODO: handle reconciliation of etcd members and kubeadm config in case they get out of sync with cluster
-	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp.Name))
+	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp))
 	if err != nil {
 		logger.Error(err, "failed to retrieve machines for cluster")
 		return ctrl.Result{}, err
@@ -645,10 +645,6 @@ func (r *KubeadmControlPlaneReconciler) failureDomainForScaleDown(cluster *clust
 	if len(cluster.Status.FailureDomains.FilterControlPlane()) == 0 {
 		return nil
 	}
-	ownedMachines, err := r.managementCluster.GetMachinesForCluster(ctx, util.ObjectKey(cluster), internal.OwnedControlPlaneMachines(kcp))
-	if err != nil {
-		return nil, err
-	}
 
 	// Otherwise pick the currently known failure domain with the most Machines
 	failureDomain := internal.PickMost(cluster.Status.FailureDomains.FilterControlPlane(), machines)
@@ -814,7 +810,7 @@ func (r *KubeadmControlPlaneReconciler) ClusterToKubeadmControlPlane(o handler.M
 	return nil
 }
 
-func (r *KubeadmControlPlaneReconciler) AdoptMachines(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, machines ...*clusterv1.Machine) error {
+func (r *KubeadmControlPlaneReconciler) AdoptMachines(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, machines internal.FilterableMachineCollection) error {
 	// We do an uncached full quorum read against the KCP to avoid re-adopting Machines the garbage collector just intentionally orphaned
 	// See https://github.com/kubernetes/kubernetes/issues/42639
 	uncached := controlplanev1.KubeadmControlPlane{}
