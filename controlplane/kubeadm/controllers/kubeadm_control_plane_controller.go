@@ -402,10 +402,12 @@ func (r *KubeadmControlPlaneReconciler) markWithAnnotationKey(ctx context.Contex
 }
 
 func (r *KubeadmControlPlaneReconciler) selectMachineForUpgrade(ctx context.Context, cluster *clusterv1.Cluster, requireUpgrade internal.FilterableMachineCollection) (*clusterv1.Machine, error) {
+	selected := requireUpgrade.Oldest()
 	failureDomain := r.failureDomainForScaleDown(cluster, requireUpgrade)
-
-	inFailureDomain := requireUpgrade.Filter(internal.InFailureDomains(failureDomain))
-	selected := inFailureDomain.Oldest()
+	if failureDomain != nil {
+		inFailureDomain := requireUpgrade.Filter(internal.InFailureDomains(failureDomain))
+		selected = inFailureDomain.Oldest()
+	}
 
 	if err := r.markWithAnnotationKey(ctx, selected, controlplanev1.SelectedForUpgradeAnnotation); err != nil {
 		return nil, errors.Wrap(err, "failed to select and mark a machine for upgrade")
@@ -467,9 +469,12 @@ func (r *KubeadmControlPlaneReconciler) scaleDownControlPlane(ctx context.Contex
 
 	markedForDeletion := machines.Filter(internal.HasAnnotationKey(controlplanev1.DeleteForScaleDownAnnotation))
 	if len(markedForDeletion) == 0 {
+		machineToMark := machines.Oldest()
 		fd := r.failureDomainForScaleDown(cluster, machines)
-		machinesInFailureDomain := machines.Filter(internal.InFailureDomains(fd))
-		machineToMark := machinesInFailureDomain.Oldest()
+		if fd != nil {
+			machinesInFailureDomain := machines.Filter(internal.InFailureDomains(fd))
+			machineToMark = machinesInFailureDomain.Oldest()
+		}
 		if machineToMark == nil {
 			logger.Info("failed to pick control plane Machine to mark for deletion")
 			return ctrl.Result{}, errors.New("failed to pick control plane Machine to mark for deletion")
@@ -477,7 +482,7 @@ func (r *KubeadmControlPlaneReconciler) scaleDownControlPlane(ctx context.Contex
 		if err := r.markWithAnnotationKey(ctx, machineToMark, controlplanev1.DeleteForScaleDownAnnotation); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "failed to mark machine %s for deletion", machineToMark.Name)
 		}
-		markedForDeletion.Insert(machinesInFailureDomain.Oldest())
+		markedForDeletion.Insert(machineToMark)
 	}
 
 	machineToDelete := markedForDeletion.Oldest()
@@ -642,7 +647,8 @@ func (r *KubeadmControlPlaneReconciler) generateKubeadmConfig(ctx context.Contex
 
 func (r *KubeadmControlPlaneReconciler) failureDomainForScaleDown(cluster *clusterv1.Cluster, machines internal.FilterableMachineCollection) *string {
 	// Don't do anything if there are no failure domains defined on the cluster.
-	if len(cluster.Status.FailureDomains.FilterControlPlane()) == 0 {
+	clusterFailureDomains := cluster.Status.FailureDomains.FilterControlPlane()
+	if len(clusterFailureDomains) == 0 || len(machines.Filter(internal.InFailureDomains(clusterFailureDomains.GetIDs()...))) == 0 {
 		return nil
 	}
 
@@ -653,7 +659,8 @@ func (r *KubeadmControlPlaneReconciler) failureDomainForScaleDown(cluster *clust
 
 func (r *KubeadmControlPlaneReconciler) failureDomainForScaleUp(cluster *clusterv1.Cluster, machines internal.FilterableMachineCollection) *string {
 	// Don't do anything if there are no failure domains defined on the cluster.
-	if len(cluster.Status.FailureDomains.FilterControlPlane()) == 0 {
+	clusterFailureDomains := cluster.Status.FailureDomains.FilterControlPlane()
+	if len(clusterFailureDomains) == 0 || len(machines.Filter(internal.InFailureDomains(clusterFailureDomains.GetIDs()...))) == 0 {
 		return nil
 	}
 	failureDomain := internal.PickFewest(cluster.Status.FailureDomains.FilterControlPlane(), machines)
