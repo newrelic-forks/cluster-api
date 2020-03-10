@@ -265,7 +265,7 @@ var _ = Describe("Docker", func() {
 				}
 				framework.CreateCluster(ctx, createClusterInput)
 
-				version := "1.16.3"
+				version := framework.DefaultKubernetesVersion
 
 				// Wait for the cluster to provision.
 				assertClusterProvisionsInput := framework.WaitForClusterToProvisionInput{
@@ -317,7 +317,7 @@ var _ = Describe("Docker", func() {
 
 				// We have to set the control plane ref on the cluster as well
 				cl := &clusterv1.Cluster{}
-				client.Get(ctx, ctrlclient.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, cl)
+				Expect(client.Get(ctx, ctrlclient.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, cl)).To(Succeed())
 				cl.Spec.ControlPlaneRef = controlPlaneRef
 				Expect(client.Update(ctx, cl)).To(Succeed())
 
@@ -336,6 +336,7 @@ var _ = Describe("Docker", func() {
 
 				By("taking stable ownership of the Machines")
 				for _, m := range machines.Items {
+					m := m
 					Expect(&m).To(HaveControllerRef(framework.TypeToKind(controlPlane), controlPlane))
 					Expect(m.CreationTimestamp.Time).To(BeTemporally("<", controlPlane.CreationTimestamp.Time))
 				}
@@ -348,6 +349,7 @@ var _ = Describe("Docker", func() {
 				})).To(Succeed())
 
 				for _, s := range secrets.Items {
+					s := s
 					// We don't check the data, and removing it from the object makes assertions much easier to read
 					s.Data = nil
 
@@ -369,7 +371,7 @@ var _ = Describe("Docker", func() {
 						Expect(&s).To(HaveControllerRef(framework.TypeToKind(controlPlane), controlPlane))
 					}
 				}
-				Expect(secrets.Items).To(HaveLen(4 /* pki */ + 1 /* kubeconfig */ + int(replicas)))
+				Expect(secrets.Items).To(HaveLen(4 /* pki */ + 1 /* kubeconfig */ + replicas))
 
 				By("ensuring we can still join machines after the adoption")
 				md, infraTemplate, bootstrapTemplate := GenerateMachineDeployment(cluster, 1)
@@ -398,7 +400,7 @@ var _ = Describe("Docker", func() {
 func GenerateMachineDeployment(cluster *clusterv1.Cluster, replicas int32) (*clusterv1.MachineDeployment, *infrav1.DockerMachineTemplate, *bootstrapv1.KubeadmConfigTemplate) {
 	namespace := cluster.GetNamespace()
 	generatedName := fmt.Sprintf("%s-md", cluster.GetName())
-	version := "1.16.3"
+	version := framework.DefaultKubernetesVersion
 
 	infraTemplate := &infrav1.DockerMachineTemplate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -466,7 +468,7 @@ type ClusterGenerator struct {
 func (c *ClusterGenerator) GenerateCluster(namespace string, replicas int32) (*clusterv1.Cluster, *infrav1.DockerCluster, *controlplanev1.KubeadmControlPlane, *infrav1.DockerMachineTemplate) {
 	generatedName := fmt.Sprintf("test-%d", c.counter)
 	c.counter++
-	version := "1.16.3"
+	version := framework.DefaultKubernetesVersion
 
 	infraCluster := &infrav1.DockerCluster{
 		ObjectMeta: metav1.ObjectMeta{

@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/equality"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	kubeadmv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
@@ -240,7 +241,7 @@ func (r *KubeadmControlPlaneReconciler) reconcile(ctx context.Context, cluster *
 	adoptableMachines := controlPlaneMachines.Filter(internal.AdoptableControlPlaneMachines(cluster.Name))
 	if len(adoptableMachines) > 0 {
 		// We adopt the Machines and then wait for the update event for the ownership reference to re-queue them so the cache is up-to-date
-		err = r.adoptMachines(ctx, kcp, adoptableMachines)
+		err = r.adoptMachines(ctx, kcp, adoptableMachines, cluster)
 		return ctrl.Result{}, err
 	}
 
@@ -867,7 +868,7 @@ func (r *KubeadmControlPlaneReconciler) ClusterToKubeadmControlPlane(o handler.M
 	return nil
 }
 
-func (r *KubeadmControlPlaneReconciler) adoptMachines(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, machines internal.FilterableMachineCollection) error {
+func (r *KubeadmControlPlaneReconciler) adoptMachines(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane, machines internal.FilterableMachineCollection, cluster *clusterv1.Cluster) error {
 	// We do an uncached full quorum read against the KCP to avoid re-adopting Machines the garbage collector just intentionally orphaned
 	// See https://github.com/kubernetes/kubernetes/issues/42639
 	uncached := controlplanev1.KubeadmControlPlane{}
@@ -916,13 +917,13 @@ func (r *KubeadmControlPlaneReconciler) adoptMachines(ctx context.Context, kcp *
 
 	for _, m := range machines {
 		ref := m.Spec.Bootstrap.ConfigRef
-		obj := &bootstrapv1.KubeadmConfig{}
-		err := r.Client.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: kcp.Namespace}, obj)
+		cfg := &bootstrapv1.KubeadmConfig{}
+		err := r.Client.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: kcp.Namespace}, cfg)
 		if err != nil {
 			return err
 		}
 
-		err = r.adoptOwnedSecrets(ctx, kcp, obj)
+		err = r.adoptOwnedSecrets(ctx, kcp, cfg)
 		if err != nil {
 			return err
 		}
@@ -943,11 +944,12 @@ func (r *KubeadmControlPlaneReconciler) adoptMachines(ctx context.Context, kcp *
 		}
 
 		// 1. hash the version (kubernetes version) and kubeadm_controlplane's Spec.infrastructureTemplate
-		asIfSpec := controlplanev1.KubeadmControlPlaneSpec{
+		syntheticSpec := controlplanev1.KubeadmControlPlaneSpec{
 			Version:                machineKubernetesVersion,
 			InfrastructureTemplate: kcp.Spec.InfrastructureTemplate,
+			KubeadmConfigSpec:      equality.SemanticMerge(cfg.Spec, kcp.Spec.KubeadmConfigSpec, cluster),
 		}
-		newConfigurationHash := hash.Compute(&asIfSpec)
+		newConfigurationHash := hash.Compute(&syntheticSpec)
 		// 2. add kubeadm.controlplane.cluster.x-k8s.io/hash as a label in each machine
 		m.Labels["kubeadm.controlplane.cluster.x-k8s.io/hash"] = newConfigurationHash
 
