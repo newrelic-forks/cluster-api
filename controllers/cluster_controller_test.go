@@ -488,15 +488,11 @@ func TestClusterReconciler(t *testing.T) {
 				Kind: "Machine",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "controlPlaneWithNoderef",
-				Namespace: "test",
+				Name: "controlPlaneWithNoderef",
 				Labels: map[string]string{
 					clusterv1.ClusterLabelName:             cluster.Name,
 					clusterv1.MachineControlPlaneLabelName: "",
 				},
-			},
-			Spec: clusterv1.MachineSpec{
-				ClusterName: "test-cluster",
 			},
 			Status: clusterv1.MachineStatus{
 				NodeRef: &v1.ObjectReference{
@@ -510,15 +506,11 @@ func TestClusterReconciler(t *testing.T) {
 				Kind: "Machine",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "controlPlaneWithoutNoderef",
-				Namespace: "test",
+				Name: "controlPlaneWithoutNoderef",
 				Labels: map[string]string{
 					clusterv1.ClusterLabelName:             cluster.Name,
 					clusterv1.MachineControlPlaneLabelName: "",
 				},
-			},
-			Spec: clusterv1.MachineSpec{
-				ClusterName: "test-cluster",
 			},
 		}
 		nonControlPlaneWithNoderef := &clusterv1.Machine{
@@ -526,14 +518,10 @@ func TestClusterReconciler(t *testing.T) {
 				Kind: "Machine",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "nonControlPlaneWitNoderef",
-				Namespace: "test",
+				Name: "nonControlPlaneWitNoderef",
 				Labels: map[string]string{
 					clusterv1.ClusterLabelName: cluster.Name,
 				},
-			},
-			Spec: clusterv1.MachineSpec{
-				ClusterName: "test-cluster",
 			},
 			Status: clusterv1.MachineStatus{
 				NodeRef: &v1.ObjectReference{
@@ -547,14 +535,10 @@ func TestClusterReconciler(t *testing.T) {
 				Kind: "Machine",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "nonControlPlaneWithoutNoderef",
-				Namespace: "test",
+				Name: "nonControlPlaneWithoutNoderef",
 				Labels: map[string]string{
 					clusterv1.ClusterLabelName: cluster.Name,
 				},
-			},
-			Spec: clusterv1.MachineSpec{
-				ClusterName: "test-cluster",
 			},
 		}
 

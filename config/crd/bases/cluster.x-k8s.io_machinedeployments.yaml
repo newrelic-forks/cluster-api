@@ -1,10 +1,10 @@
 
 ---
-apiVersion: apiextensions.k8s.io/v1
+apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.2.6-0.20200226180227-d6efdcdd90e2
+    controller-gen.kubebuilder.io/version: v0.2.4
   creationTimestamp: null
   name: machinedeployments.cluster.x-k8s.io
 spec:
@@ -18,7 +18,15 @@ spec:
     shortNames:
     - md
     singular: machinedeployment
+  preserveUnknownFields: false
   scope: Namespaced
+  subresources:
+    scale:
+      labelSelectorPath: .status.selector
+      specReplicasPath: .spec.replicas
+      statusReplicasPath: .status.replicas
+    status: {}
+  version: v1alpha2
   versions:
   - name: v1alpha2
     schema:
@@ -536,27 +544,21 @@ spec:
         type: object
     served: true
     storage: false
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
   - additionalPrinterColumns:
-    - description: MachineDeployment status such as ScalingUp/ScalingDown/Running/Failed/Unknown
-      jsonPath: .status.phase
+    - JSONPath: .status.phase
+      description: MachineDeployment status such as ScalingUp/ScalingDown/Running/Failed/Unknown
       name: Phase
       type: string
-    - description: Total number of non-terminated machines targeted by this deployment
-      jsonPath: .status.replicas
+    - JSONPath: .status.replicas
+      description: Total number of non-terminated machines targeted by this deployment
       name: Replicas
       type: integer
-    - description: Total number of available machines (ready for at least minReadySeconds)
-      jsonPath: .status.availableReplicas
+    - JSONPath: .status.availableReplicas
+      description: Total number of available machines (ready for at least minReadySeconds)
       name: Available
       type: integer
-    - description: Total number of ready machines targeted by this deployment.
-      jsonPath: .status.readyReplicas
+    - JSONPath: .status.readyReplicas
+      description: Total number of ready machines targeted by this deployment.
       name: Ready
       type: integer
     name: v1alpha3
@@ -1002,12 +1004,6 @@ spec:
         type: object
     served: true
     storage: true
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
 status:
   acceptedNames:
     kind: ""

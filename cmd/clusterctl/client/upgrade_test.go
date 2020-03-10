@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
@@ -192,6 +193,7 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			}
 
 			if !reflect.DeepEqual(gotProviders, tt.wantProviders) {
+				spew.Dump(gotProviders, tt.wantProviders)
 				t.Errorf("got = %v, want %v", gotProviders, tt.wantProviders)
 			}
 		})

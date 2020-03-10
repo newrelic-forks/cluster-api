@@ -19,6 +19,7 @@ package conversion
 import (
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	. "github.com/onsi/gomega"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,6 +82,8 @@ func TestMarshalData(t *testing.T) {
 
 		g.Expect(MarshalData(src, dst)).To(Succeed())
 		g.Expect(len(dst.Annotations)).To(Equal(2))
+
+		spew.Dump(dst.Annotations)
 	})
 }
 

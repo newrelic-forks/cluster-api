@@ -15,9 +15,6 @@
 # If you update this file, please follow
 # https://suva.sh/posts/well-documented-makefiles
 
-# Ensure Make is run with bash shell as some syntax below is bash-specific
-SHELL:=/usr/bin/env bash
-
 .DEFAULT_GOAL:=help
 
 # Use GOPROXY environment variable if set
@@ -266,16 +263,20 @@ generate-core-manifests: $(CONTROLLER_GEN) ## Generate manifests for the core pr
 	$(CONTROLLER_GEN) \
 		paths=./api/... \
 		paths=./controllers/... \
+<<<<<<< HEAD
 		paths=./$(EXP_DIR)/api/... \
 		paths=./$(EXP_DIR)/controllers/... \
 		crd:crdVersions=v1 \
+=======
+		crd:preserveUnknownFields=false \
+>>>>>>> parent of c39251437... ✨ Update and require CRDv1
 		rbac:roleName=manager-role \
 		output:crd:dir=./config/crd/bases \
 		output:webhook:dir=./config/webhook \
 		webhook
 	$(CONTROLLER_GEN) \
 		paths=./cmd/clusterctl/api/... \
-		crd:crdVersions=v1 \
+		crd:trivialVersions=true,preserveUnknownFields=false \
 		output:crd:dir=./cmd/clusterctl/config/crd/bases
 	## Copy files in CI folders.
 	cp -f ./config/rbac/*.yaml ./config/ci/rbac/
@@ -286,7 +287,7 @@ generate-kubeadm-bootstrap-manifests: $(CONTROLLER_GEN) ## Generate manifests fo
 	$(CONTROLLER_GEN) \
 		paths=./bootstrap/kubeadm/api/... \
 		paths=./bootstrap/kubeadm/controllers/... \
-		crd:crdVersions=v1 \
+		crd:trivialVersions=false,preserveUnknownFields=false \
 		rbac:roleName=manager-role \
 		output:crd:dir=./bootstrap/kubeadm/config/crd/bases \
 		output:rbac:dir=./bootstrap/kubeadm/config/rbac \
@@ -298,7 +299,7 @@ generate-kubeadm-control-plane-manifests: $(CONTROLLER_GEN) ## Generate manifest
 	$(CONTROLLER_GEN) \
 		paths=./controlplane/kubeadm/api/... \
 		paths=./controlplane/kubeadm/controllers/... \
-		crd:crdVersions=v1 \
+		crd:preserveUnknownFields=false \
 		rbac:roleName=manager-role \
 		output:crd:dir=./controlplane/kubeadm/config/crd/bases \
 		output:rbac:dir=./controlplane/kubeadm/config/rbac \
