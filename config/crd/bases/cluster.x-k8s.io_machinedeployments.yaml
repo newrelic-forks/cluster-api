@@ -536,12 +536,6 @@ spec:
         type: object
     served: true
     storage: false
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
   - additionalPrinterColumns:
     - description: MachineDeployment status such as ScalingUp/ScalingDown/Running/Failed/Unknown
       JSONPath: .status.phase
@@ -1002,12 +996,12 @@ spec:
         type: object
     served: true
     storage: true
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
+  subresources:
+    scale:
+      labelSelectorPath: .status.selector
+      specReplicasPath: .spec.replicas
+      statusReplicasPath: .status.replicas
+    status: {}
 status:
   acceptedNames:
     kind: ""

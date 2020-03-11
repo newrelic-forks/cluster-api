@@ -497,12 +497,6 @@ spec:
         type: object
     served: true
     storage: false
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
   - additionalPrinterColumns:
     - description: Total number of non-terminated machines targeted by this machineset
       JSONPath: .status.replicas
@@ -916,12 +910,12 @@ spec:
         type: object
     served: true
     storage: true
-    subresources:
-      scale:
-        labelSelectorPath: .status.selector
-        specReplicasPath: .spec.replicas
-        statusReplicasPath: .status.replicas
-      status: {}
+  subresources:
+    scale:
+      labelSelectorPath: .status.selector
+      specReplicasPath: .spec.replicas
+      statusReplicasPath: .status.replicas
+    status: {}
 status:
   acceptedNames:
     kind: ""
