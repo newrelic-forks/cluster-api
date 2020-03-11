@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blang/semver"
 	"github.com/docker/distribution/reference"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -290,6 +291,22 @@ func EnsureOwnerRef(ownerReferences []metav1.OwnerReference, ref metav1.OwnerRef
 	return ownerReferences
 }
 
+// ReplaceOwnerRef re-parents an object from one OwnerReference to another
+func ReplaceOwnerRef(ownerReferences []metav1.OwnerReference, target metav1.OwnerReference, source metav1.Object) []metav1.OwnerReference {
+	fi := -1
+	for index, r := range ownerReferences {
+		if r.UID == source.GetUID() {
+			fi = index
+			ownerReferences[index] = target
+			break
+		}
+	}
+	if fi < 0 {
+		ownerReferences = append(ownerReferences, target)
+	}
+	return ownerReferences
+}
+
 // indexOwnerRef returns the index of the owner reference in the slice if found, or -1.
 func indexOwnerRef(ownerReferences []metav1.OwnerReference, ref metav1.OwnerReference) int {
 	for index, r := range ownerReferences {
@@ -316,9 +333,9 @@ func referSameObject(a, b metav1.OwnerReference) bool {
 }
 
 // PointsTo returns true if any of the owner references point to the given target
-func PointsTo(refs []metav1.OwnerReference, target *metav1.ObjectMeta) bool {
+func PointsTo(refs []metav1.OwnerReference, target metav1.Object) bool {
 	for _, ref := range refs {
-		if ref.UID == target.UID {
+		if ref.UID == target.GetUID() {
 			return true
 		}
 	}
@@ -425,4 +442,17 @@ func (o MachinesByCreationTimestamp) Less(i, j int) bool {
 		return o[i].Name < o[j].Name
 	}
 	return o[i].CreationTimestamp.Before(&o[j].CreationTimestamp)
+}
+
+// IsSupportedVersionSkew will return true if a and b are no more than one minor version off from each other
+func IsSupportedVersionSkew(a, b semver.Version) bool {
+	if a.Major != b.Major {
+		return false
+	}
+
+	if a.Minor > b.Minor {
+		return a.Minor-b.Minor == 1
+	}
+	return b.Minor-a.Minor <= 1
+
 }

@@ -225,7 +225,8 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 	dns := before.DeepCopy()
 	dns.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS = kubeadmv1beta1.DNS{
 		ImageMeta: kubeadmv1beta1.ImageMeta{
-			ImageTag: "my dns tag",
+			ImageRepository: "gcr.io/capi-test",
+			ImageTag:        "v0.20.0",
 		},
 	}
 
@@ -295,6 +296,9 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 			Endpoints: []string{"127.0.0.1"},
 		},
 	}
+
+	withoutClusterConfiguration := before.DeepCopy()
+	withoutClusterConfiguration.Spec.KubeadmConfigSpec.ClusterConfiguration = nil
 
 	tests := []struct {
 		name      string
@@ -400,7 +404,7 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 		},
 		{
 			name:      "should fail when making a change to the cluster config's dns",
-			expectErr: true,
+			expectErr: false,
 			before:    before,
 			kcp:       dns,
 		},
@@ -475,6 +479,12 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 			expectErr: true,
 			before:    beforeInvalidEtcdCluster,
 			kcp:       afterInvalidEtcdCluster,
+		},
+		{
+			name:      "should pass if ClusterConfiguration is nil",
+			expectErr: false,
+			before:    withoutClusterConfiguration,
+			kcp:       withoutClusterConfiguration,
 		},
 	}
 

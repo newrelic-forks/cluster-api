@@ -75,6 +75,8 @@ func (in *KubeadmControlPlane) ValidateUpdate(old runtime.Object) error {
 		{"metadata", "*"},
 		{spec, kubeadmConfigSpec, clusterConfiguration, "etcd", "local", "imageRepository"},
 		{spec, kubeadmConfigSpec, clusterConfiguration, "etcd", "local", "imageTag"},
+		{spec, kubeadmConfigSpec, clusterConfiguration, "dns", "imageRepository"},
+		{spec, kubeadmConfigSpec, clusterConfiguration, "dns", "imageTag"},
 		{spec, "infrastructureTemplate", "name"},
 		{spec, "replicas"},
 		{spec, "version"},
@@ -230,6 +232,10 @@ func (in *KubeadmControlPlane) validateCommon() (allErrs field.ErrorList) {
 }
 
 func (in *KubeadmControlPlane) validateEtcd(prev *KubeadmControlPlane) (allErrs field.ErrorList) {
+	if in.Spec.KubeadmConfigSpec.ClusterConfiguration == nil {
+		return allErrs
+	}
+
 	if in.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.External != nil && prev.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local != nil {
 		allErrs = append(
 			allErrs,

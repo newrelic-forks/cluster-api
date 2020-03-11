@@ -24,6 +24,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -465,6 +466,206 @@ func TestReconcileClusterNoEndpoints(t *testing.T) {
 	g.Expect(machineList.Items).To(BeEmpty())
 }
 
+func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
+	t.Run("adopts existing Machines", func(t *testing.T) {
+		g := NewWithT(t)
+
+		cluster, kcp, tmpl := createClusterWithControlPlane()
+		cluster.Spec.ControlPlaneEndpoint.Host = "bar"
+		kcp.Spec.Version = "v2.0.0"
+
+		fmc := &fakeManagementCluster{
+			Machines:            internal.FilterableMachineCollection{},
+			ControlPlaneHealthy: true,
+			EtcdHealthy:         true,
+		}
+		objs := []runtime.Object{cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
+		for i := 0; i < 3; i++ {
+			name := fmt.Sprintf("test-%d", i)
+			m := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      name,
+					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				},
+				Spec: clusterv1.MachineSpec{
+					Bootstrap: clusterv1.Bootstrap{
+						ConfigRef: &corev1.ObjectReference{
+							APIVersion: bootstrapv1.GroupVersion.String(),
+							Kind:       "KubeadmConfig",
+							Name:       name,
+						},
+					},
+					Version: utilpointer.StringPtr("v2.0.0"),
+				},
+			}
+			cfg := &bootstrapv1.KubeadmConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      name,
+				},
+			}
+			objs = append(objs, m, cfg)
+			fmc.Machines.Insert(m)
+		}
+
+		fakeClient := newFakeClient(g, objs...)
+
+		log.SetLogger(klogr.New())
+		r := &KubeadmControlPlaneReconciler{
+			Client:            fakeClient,
+			Log:               log.Log,
+			scheme:            scheme.Scheme,
+			managementCluster: fmc,
+
+			uncachedClient: fakeClient,
+		}
+
+		g.Expect(r.reconcile(context.Background(), cluster, kcp)).To(Equal(ctrl.Result{}))
+
+		machineList := &clusterv1.MachineList{}
+		g.Expect(fakeClient.List(context.Background(), machineList, client.InNamespace(cluster.Namespace))).To(Succeed())
+		g.Expect(machineList.Items).NotTo(BeEmpty())
+		g.Expect(machineList.Items).To(HaveLen(3))
+		for _, machine := range machineList.Items {
+			g.Expect(machine.OwnerReferences).To(HaveLen(1))
+			g.Expect(machine.OwnerReferences).To(ContainElement(*metav1.NewControllerRef(kcp, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane"))))
+			g.Expect(machine.Labels).To(Equal(internal.ControlPlaneLabelsForClusterWithHash(cluster.Name, hash.Compute(&kcp.Spec))))
+		}
+	})
+
+	t.Run("Deleted KubeadmControlPlanes don't adopt machines", func(t *testing.T) {
+		// Usually we won't get into the inner reconcile with a deleted control plane, but it's possible when deleting with "oprhanDependents":
+		// 1. The deletion timestamp is set in the API server, but our cache has not yet updated
+		// 2. The garbage collector removes our ownership reference from a Machine, triggering a re-reconcile (or we get unlucky with the periodic reconciliation)
+		// 3. We get into the inner reconcile function and re-adopt the Machine
+		// 4. The update to our cache for our deletion timestamp arrives
+		g := NewWithT(t)
+
+		cluster, kcp, tmpl := createClusterWithControlPlane()
+		cluster.Spec.ControlPlaneEndpoint.Host = "foo"
+		kcp.Spec.Version = "v2.0.0"
+
+		now := metav1.Now()
+		kcp.DeletionTimestamp = &now
+
+		fmc := &fakeManagementCluster{
+			Machines:            internal.FilterableMachineCollection{},
+			ControlPlaneHealthy: true,
+			EtcdHealthy:         true,
+		}
+		objs := []runtime.Object{cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy()}
+		for i := 0; i < 3; i++ {
+			name := fmt.Sprintf("test-%d", i)
+			m := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      name,
+					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				},
+				Spec: clusterv1.MachineSpec{
+					Bootstrap: clusterv1.Bootstrap{
+						ConfigRef: &corev1.ObjectReference{
+							APIVersion: bootstrapv1.GroupVersion.String(),
+							Kind:       "KubeadmConfig",
+							Name:       name,
+						},
+					},
+					Version: utilpointer.StringPtr("v2.0.0"),
+				},
+			}
+			cfg := &bootstrapv1.KubeadmConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: cluster.Namespace,
+					Name:      name,
+				},
+			}
+			objs = append(objs, m, cfg)
+			fmc.Machines.Insert(m)
+		}
+		fakeClient := newFakeClient(g, objs...)
+
+		log.SetLogger(klogr.New())
+		r := &KubeadmControlPlaneReconciler{
+			Client:            fakeClient,
+			Log:               log.Log,
+			scheme:            scheme.Scheme,
+			managementCluster: fmc,
+
+			uncachedClient: fakeClient,
+		}
+
+		result, err := r.reconcile(context.Background(), cluster, kcp)
+		g.Expect(result).To(Equal(ctrl.Result{}))
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("has just been deleted"))
+
+		machineList := &clusterv1.MachineList{}
+		g.Expect(fakeClient.List(context.Background(), machineList, client.InNamespace(cluster.Namespace))).To(Succeed())
+		g.Expect(machineList.Items).NotTo(BeEmpty())
+		g.Expect(machineList.Items).To(HaveLen(3))
+		for _, machine := range machineList.Items {
+			g.Expect(machine.OwnerReferences).To(BeEmpty())
+		}
+	})
+
+	t.Run("refuses to adopt Machines that are more than one version old", func(t *testing.T) {
+		g := NewWithT(t)
+
+		cluster, kcp, tmpl := createClusterWithControlPlane()
+		cluster.Spec.ControlPlaneEndpoint.Host = "foo"
+		kcp.Spec.Version = "v1.17.0"
+
+		fmc := &fakeManagementCluster{
+			Machines: internal.FilterableMachineCollection{
+				"test0": &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: cluster.Namespace,
+						Name:      fmt.Sprintf("test0"),
+						Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+					},
+					Spec: clusterv1.MachineSpec{
+						Bootstrap: clusterv1.Bootstrap{
+							ConfigRef: &corev1.ObjectReference{
+								APIVersion: bootstrapv1.GroupVersion.String(),
+								Kind:       "KubeadmConfig",
+							},
+						},
+						Version: utilpointer.StringPtr("v1.15.0"),
+					},
+				},
+			},
+			ControlPlaneHealthy: true,
+			EtcdHealthy:         true,
+		}
+
+		fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy(), fmc.Machines["test0"].DeepCopy())
+
+		log.SetLogger(klogr.New())
+		recorder := record.NewFakeRecorder(32)
+		r := &KubeadmControlPlaneReconciler{
+			Client:            fakeClient,
+			Log:               log.Log,
+			managementCluster: fmc,
+			recorder:          recorder,
+
+			uncachedClient: fakeClient,
+		}
+
+		g.Expect(r.reconcile(context.Background(), cluster, kcp)).To(Equal(ctrl.Result{}))
+		// Message: Warning AdoptionFailed Could not adopt Machine test/test0: its version ("v1.15.0") is outside supported +/- one minor version skew from KCP's ("v1.17.0")
+		g.Expect(recorder.Events).To(Receive(ContainSubstring("minor version")))
+
+		machineList := &clusterv1.MachineList{}
+		g.Expect(fakeClient.List(context.Background(), machineList, client.InNamespace(cluster.Namespace))).To(Succeed())
+		g.Expect(machineList.Items).NotTo(BeEmpty())
+		g.Expect(machineList.Items).To(HaveLen(1))
+		for _, machine := range machineList.Items {
+			g.Expect(machine.OwnerReferences).To(BeEmpty())
+		}
+	})
+}
+
 func TestReconcileInitializeControlPlane(t *testing.T) {
 	g := NewWithT(t)
 
@@ -529,7 +730,59 @@ func TestReconcileInitializeControlPlane(t *testing.T) {
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), cluster.DeepCopy(), genericMachineTemplate.DeepCopy())
+	corednsCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "coredns",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			"Corefile": "original-core-file",
+		},
+	}
+
+	kubeadmCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubeadm-config",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			"ClusterConfiguration": `apiServer:
+dns:
+  type: CoreDNS
+imageRepository: k8s.gcr.io
+kind: ClusterConfiguration
+kubernetesVersion: metav1.16.1`,
+		},
+	}
+	corednsDepl := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "coredns",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "coredns",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "coredns",
+						Image: "k8s.gcr.io/coredns:1.6.2",
+					}},
+				},
+			},
+		},
+	}
+
+	fakeClient := newFakeClient(
+		g,
+		kcp.DeepCopy(),
+		cluster.DeepCopy(),
+		genericMachineTemplate.DeepCopy(),
+		corednsCM.DeepCopy(),
+		kubeadmCM.DeepCopy(),
+		corednsDepl.DeepCopy(),
+	)
 	log.SetLogger(klogr.New())
 
 	expectedLabels := map[string]string{clusterv1.ClusterLabelName: "foo"}
@@ -540,7 +793,12 @@ func TestReconcileInitializeControlPlane(t *testing.T) {
 		recorder: record.NewFakeRecorder(32),
 		managementCluster: &fakeManagementCluster{
 			Management: &internal.Management{Client: fakeClient},
-			Workload:   fakeWorkloadCluster{Workload: &internal.Workload{Client: fakeClient}, Status: internal.ClusterStatus{}},
+			Workload: fakeWorkloadCluster{
+				Workload: &internal.Workload{
+					Client: fakeClient,
+				},
+				Status: internal.ClusterStatus{},
+			},
 		},
 	}
 
@@ -956,6 +1214,250 @@ func TestKubeadmControlPlaneReconciler_updateStatusMachinesReadyMixed(t *testing
 	g.Expect(kcp.Status.FailureReason).To(BeEquivalentTo(""))
 	g.Expect(kcp.Status.Initialized).To(BeTrue())
 	g.Expect(kcp.Status.Ready).To(BeTrue())
+}
+
+func TestKubeadmControlPlaneReconciler_updateCoreDNS(t *testing.T) {
+	// TODO: (wfernandes) This test could use some refactor love.
+
+	cluster := &clusterv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "foo",
+			Namespace: "test",
+		},
+	}
+	kcp := &controlplanev1.KubeadmControlPlane{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: cluster.Namespace,
+			Name:      "foo",
+		},
+		Spec: controlplanev1.KubeadmControlPlaneSpec{
+			Replicas: nil,
+			Version:  "",
+			KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
+				ClusterConfiguration: &kubeadmv1.ClusterConfiguration{
+					DNS: kubeadmv1.DNS{
+						Type: kubeadmv1.CoreDNS,
+						ImageMeta: kubeadmv1.ImageMeta{
+							ImageRepository: "k8s.gcr.io/coredns",
+							ImageTag:        "1.7.2",
+						},
+					},
+				},
+			},
+		},
+	}
+	depl := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "coredns",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "coredns",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "coredns",
+						Image: "k8s.gcr.io/coredns:1.6.2",
+					}},
+					Volumes: []corev1.Volume{{
+						Name: "config-volume",
+						VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: "coredns",
+								},
+								Items: []corev1.KeyToPath{{
+									Key:  "Corefile",
+									Path: "Corefile",
+								}},
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	originalCorefile := "original core file"
+	corednsCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "coredns",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			"Corefile": originalCorefile,
+		},
+	}
+
+	kubeadmCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubeadm-config",
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			"ClusterConfiguration": `apiServer:
+dns:
+  type: CoreDNS
+imageRepository: k8s.gcr.io
+kind: ClusterConfiguration
+kubernetesVersion: metav1.16.1`,
+		},
+	}
+
+	t.Run("updates configmaps and deployments successfully", func(t *testing.T) {
+		g := NewWithT(t)
+		objs := []runtime.Object{
+			cluster.DeepCopy(),
+			kcp.DeepCopy(),
+			depl.DeepCopy(),
+			corednsCM.DeepCopy(),
+			kubeadmCM.DeepCopy(),
+		}
+		fakeClient := newFakeClient(g, objs...)
+		log.SetLogger(klogr.New())
+
+		workloadCluster := fakeWorkloadCluster{
+			Workload: &internal.Workload{
+				Client: fakeClient,
+				CoreDNSMigrator: &fakeMigrator{
+					migratedCorefile: "new core file",
+				},
+			},
+		}
+
+		g.Expect(workloadCluster.UpdateCoreDNS(context.TODO(), kcp)).To(Succeed())
+
+		var actualCoreDNSCM corev1.ConfigMap
+		g.Expect(fakeClient.Get(context.TODO(), client.ObjectKey{Name: "coredns", Namespace: metav1.NamespaceSystem}, &actualCoreDNSCM)).To(Succeed())
+		g.Expect(actualCoreDNSCM.Data).To(HaveLen(2))
+		g.Expect(actualCoreDNSCM.Data).To(HaveKeyWithValue("Corefile", "new core file"))
+		g.Expect(actualCoreDNSCM.Data).To(HaveKeyWithValue("Corefile-backup", originalCorefile))
+
+		var actualKubeadmConfig corev1.ConfigMap
+		g.Expect(fakeClient.Get(context.TODO(), client.ObjectKey{Name: "kubeadm-config", Namespace: metav1.NamespaceSystem}, &actualKubeadmConfig)).To(Succeed())
+		g.Expect(actualKubeadmConfig.Data).To(HaveKey("ClusterConfiguration"))
+		g.Expect(actualKubeadmConfig.Data["ClusterConfiguration"]).To(ContainSubstring("1.7.2"))
+
+		expectedVolume := corev1.Volume{
+			Name: "config-volume",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "coredns",
+					},
+					Items: []corev1.KeyToPath{{
+						Key:  "Corefile",
+						Path: "Corefile",
+					}},
+				},
+			},
+		}
+		var actualCoreDNSDeployment appsv1.Deployment
+		g.Expect(fakeClient.Get(context.TODO(), client.ObjectKey{Name: "coredns", Namespace: metav1.NamespaceSystem}, &actualCoreDNSDeployment)).To(Succeed())
+		g.Expect(actualCoreDNSDeployment.Spec.Template.Spec.Containers[0].Image).To(Equal("k8s.gcr.io/coredns:1.7.2"))
+		g.Expect(actualCoreDNSDeployment.Spec.Template.Spec.Volumes).To(ConsistOf(expectedVolume))
+	})
+
+	t.Run("returns no error when no ClusterConfiguration is specified", func(t *testing.T) {
+		g := NewWithT(t)
+		kcp := kcp.DeepCopy()
+		kcp.Spec.KubeadmConfigSpec.ClusterConfiguration = nil
+
+		objs := []runtime.Object{
+			cluster.DeepCopy(),
+			kcp,
+			depl.DeepCopy(),
+			corednsCM.DeepCopy(),
+			kubeadmCM.DeepCopy(),
+		}
+
+		fakeClient := newFakeClient(g, objs...)
+		log.SetLogger(klogr.New())
+
+		workloadCluster := fakeWorkloadCluster{
+			Workload: &internal.Workload{
+				Client: fakeClient,
+				CoreDNSMigrator: &fakeMigrator{
+					migratedCorefile: "new core file",
+				},
+			},
+		}
+
+		g.Expect(workloadCluster.UpdateCoreDNS(context.TODO(), kcp)).To(Succeed())
+	})
+
+	t.Run("should not return an error when there is no CoreDNS configmap", func(t *testing.T) {
+		g := NewWithT(t)
+		objs := []runtime.Object{
+			cluster.DeepCopy(),
+			kcp.DeepCopy(),
+			depl.DeepCopy(),
+			kubeadmCM.DeepCopy(),
+		}
+
+		fakeClient := newFakeClient(g, objs...)
+		log.SetLogger(klogr.New())
+
+		workloadCluster := fakeWorkloadCluster{
+			Workload: &internal.Workload{
+				Client: fakeClient,
+				CoreDNSMigrator: &fakeMigrator{
+					migratedCorefile: "new core file",
+				},
+			},
+		}
+
+		g.Expect(workloadCluster.UpdateCoreDNS(context.TODO(), kcp)).To(Succeed())
+	})
+
+	t.Run("should not return an error when there is no CoreDNS deployment", func(t *testing.T) {
+		g := NewWithT(t)
+		objs := []runtime.Object{
+			cluster.DeepCopy(),
+			kcp.DeepCopy(),
+			corednsCM.DeepCopy(),
+			kubeadmCM.DeepCopy(),
+		}
+
+		fakeClient := newFakeClient(g, objs...)
+		log.SetLogger(klogr.New())
+
+		workloadCluster := fakeWorkloadCluster{
+			Workload: &internal.Workload{
+				Client: fakeClient,
+				CoreDNSMigrator: &fakeMigrator{
+					migratedCorefile: "new core file",
+				},
+			},
+		}
+
+		g.Expect(workloadCluster.UpdateCoreDNS(context.TODO(), kcp)).To(Succeed())
+	})
+
+	t.Run("returns error when unable to UpdateCoreDNS", func(t *testing.T) {
+		g := NewWithT(t)
+		objs := []runtime.Object{
+			cluster.DeepCopy(),
+			kcp.DeepCopy(),
+			depl.DeepCopy(),
+			corednsCM.DeepCopy(),
+		}
+
+		fakeClient := newFakeClient(g, objs...)
+		log.SetLogger(klogr.New())
+
+		workloadCluster := fakeWorkloadCluster{
+			Workload: &internal.Workload{
+				Client: fakeClient,
+				CoreDNSMigrator: &fakeMigrator{
+					migratedCorefile: "new core file",
+				},
+			},
+		}
+
+		g.Expect(workloadCluster.UpdateCoreDNS(context.TODO(), kcp)).ToNot(Succeed())
+	})
 }
 
 func TestCloneConfigsAndGenerateMachine(t *testing.T) {

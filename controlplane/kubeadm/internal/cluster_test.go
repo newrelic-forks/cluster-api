@@ -164,8 +164,8 @@ func TestGetMachinesForCluster(t *testing.T) {
 		t.Fatalf("expected 3 machines but found %d", len(machines))
 	}
 
-	// Test the OwnedControlPlaneMachines works
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"))
+	// Test the ControlPlaneMachines works
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	nameFilter := func(cluster *clusterv1.Machine) bool {
 		return cluster.Name == "first-machine"
 	}
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, OwnedControlPlaneMachines("my-control-plane"), nameFilter)
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"), nameFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,14 +222,19 @@ func machineListForTestGetMachinesForCluster() *clusterv1.MachineList {
 
 type fakeClient struct {
 	client.Client
-	list      interface{}
-	get       map[string]interface{}
-	getErr    error
-	createErr error
-	patchErr  error
+	list interface{}
+
+	createErr    error
+	get          map[string]interface{}
+	getCalled    bool
+	updateCalled bool
+	getErr       error
+	patchErr     error
+	updateErr    error
 }
 
 func (f *fakeClient) Get(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+	f.getCalled = true
 	if f.getErr != nil {
 		return f.getErr
 	}
@@ -243,6 +248,8 @@ func (f *fakeClient) Get(_ context.Context, key client.ObjectKey, obj runtime.Ob
 		l.DeepCopyInto(obj.(*rbacv1.Role))
 	case *appsv1.DaemonSet:
 		l.DeepCopyInto(obj.(*appsv1.DaemonSet))
+	case *corev1.ConfigMap:
+		l.DeepCopyInto(obj.(*corev1.ConfigMap))
 	case nil:
 		return apierrors.NewNotFound(schema.GroupResource{}, key.Name)
 	default:
@@ -277,6 +284,14 @@ func (f *fakeClient) Patch(_ context.Context, _ runtime.Object, _ client.Patch, 
 	return nil
 }
 
+func (f *fakeClient) Update(_ context.Context, _ runtime.Object, _ ...client.UpdateOption) error {
+	f.updateCalled = true
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	return nil
+}
+
 func TestManagementCluster_healthCheck_NoError(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -301,8 +316,7 @@ func TestManagementCluster_healthCheck_NoError(t *testing.T) {
 					"three": nil,
 				}, nil
 			},
-			clusterKey:       client.ObjectKey{Namespace: "default", Name: "cluster-name"},
-			controlPlaneName: "control-plane-name",
+			clusterKey: client.ObjectKey{Namespace: "default", Name: "cluster-name"},
 		},
 	}
 	for _, tt := range tests {
@@ -311,7 +325,7 @@ func TestManagementCluster_healthCheck_NoError(t *testing.T) {
 			m := &Management{
 				Client: &fakeClient{list: tt.machineList},
 			}
-			if err := m.healthCheck(ctx, tt.check, tt.clusterKey, tt.controlPlaneName); err != nil {
+			if err := m.healthCheck(ctx, tt.check, tt.clusterKey); err != nil {
 				t.Fatal("did not expect an error?")
 			}
 		})
@@ -417,12 +431,11 @@ func TestManagementCluster_healthCheck_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			clusterKey := client.ObjectKey{Namespace: "default", Name: "cluster-name"}
-			controlPlaneName := "control-plane-name"
 
 			m := &Management{
 				Client: &fakeClient{list: tt.machineList},
 			}
-			err := m.healthCheck(ctx, tt.check, clusterKey, controlPlaneName)
+			err := m.healthCheck(ctx, tt.check, clusterKey)
 			if err == nil {
 				t.Fatal("Expected an error")
 			}

@@ -24,7 +24,9 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
+	types "github.com/onsi/gomega/types"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -64,4 +66,38 @@ func ensureDockerArtifactsDeleted(input ensureDockerArtifactsDeletedInput) {
 	Expect(input.Lister.List(ctx, dmtl, opt)).To(Succeed())
 	Expect(dmtl.Items).To(HaveLen(0))
 	By("Succeeding in deleting all docker artifacts")
+}
+
+type controllerMatch struct {
+	kind  string
+	owner metav1.Object
+}
+
+func (m *controllerMatch) Match(actual interface{}) (success bool, err error) {
+	actualMeta, err := meta.Accessor(actual)
+	if err != nil {
+		return false, fmt.Errorf("unable to read meta for %T: %v", actual, err)
+	}
+
+	owner := metav1.GetControllerOf(actualMeta)
+	if owner == nil {
+		return false, fmt.Errorf("no controller found (owner ref with controller = true) for object %#v", actual)
+	}
+
+	match := (owner.Kind == m.kind &&
+		owner.Name == m.owner.GetName() && owner.UID == m.owner.GetUID())
+
+	return match, nil
+}
+
+func (m *controllerMatch) FailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected\n\t%#vto have a controller reference pointing to %s/%s (%v)", actual, m.kind, m.owner.GetName(), m.owner.GetUID())
+}
+
+func (m *controllerMatch) NegatedFailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected\n\t%#vto not have a controller reference pointing to %s/%s (%v)", actual, m.kind, m.owner.GetName(), m.owner.GetUID())
+}
+
+func HaveControllerRef(kind string, owner metav1.Object) types.GomegaMatcher {
+	return &controllerMatch{kind, owner}
 }
