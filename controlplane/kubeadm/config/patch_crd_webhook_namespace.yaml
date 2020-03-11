@@ -1,3 +1,3 @@
 - op: replace
-  path: "/spec/conversion/webhook/clientConfig/service/namespace"
+  path: "/spec/conversion/webhookClientConfig/service/namespace"
   value: capi-webhook-system
