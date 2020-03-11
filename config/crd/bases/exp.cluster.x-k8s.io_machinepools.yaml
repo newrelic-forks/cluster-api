@@ -19,6 +19,7 @@ spec:
     - mp
     singular: machinepool
   scope: Namespaced
+  preserveUnknownFields: false
   additionalPrinterColumns:
   - description: MachinePool status such as Terminating/Pending/Provisioning/Running/Failed
       etc
@@ -29,7 +30,7 @@ spec:
   - name: v1alpha3
     served: true
     storage: true
-  schema:
+  validation:
     openAPIV3Schema:
       description: MachinePool is the Schema for the machinepools API
       properties:
