@@ -19,8 +19,7 @@ spec:
     - ma
     singular: machine
   scope: Namespaced
-  versions:
-  - additionalPrinterColumns:
+  additionalPrinterColumns:
     - description: Provider ID
       JSONPath: .spec.providerID
       name: ProviderID
@@ -34,7 +33,8 @@ spec:
       name: NodeName
       priority: 1
       type: string
-    name: v1alpha2
+  versions:
+  - name: v1alpha2
     schema:
       openAPIV3Schema:
         description: Machine is the Schema for the machines API
@@ -374,21 +374,7 @@ spec:
     storage: false
     subresources:
       status: {}
-  - additionalPrinterColumns:
-    - description: Provider ID
-      JSONPath: .spec.providerID
-      name: ProviderID
-      type: string
-    - description: Machine status such as Terminating/Pending/Running/Failed etc
-      JSONPath: .status.phase
-      name: Phase
-      type: string
-    - description: Node name associated with this machine
-      JSONPath: .status.nodeRef.name
-      name: NodeName
-      priority: 1
-      type: string
-    name: v1alpha3
+  - name: v1alpha3
     schema:
       openAPIV3Schema:
         description: Machine is the Schema for the machines API
