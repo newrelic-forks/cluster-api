@@ -23,7 +23,7 @@ spec:
   - additionalPrinterColumns:
     - description: MachinePool status such as Terminating/Pending/Provisioning/Running/Failed
         etc
-      jsonPath: .status.phase
+      JSONPath: .status.phase
       name: Phase
       type: string
     name: v1alpha3

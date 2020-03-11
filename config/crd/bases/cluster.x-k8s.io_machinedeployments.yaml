@@ -544,19 +544,19 @@ spec:
       status: {}
   - additionalPrinterColumns:
     - description: MachineDeployment status such as ScalingUp/ScalingDown/Running/Failed/Unknown
-      jsonPath: .status.phase
+      JSONPath: .status.phase
       name: Phase
       type: string
     - description: Total number of non-terminated machines targeted by this deployment
-      jsonPath: .status.replicas
+      JSONPath: .status.replicas
       name: Replicas
       type: integer
     - description: Total number of available machines (ready for at least minReadySeconds)
-      jsonPath: .status.availableReplicas
+      JSONPath: .status.availableReplicas
       name: Available
       type: integer
     - description: Total number of ready machines targeted by this deployment.
-      jsonPath: .status.readyReplicas
+      JSONPath: .status.readyReplicas
       name: Ready
       type: integer
     name: v1alpha3

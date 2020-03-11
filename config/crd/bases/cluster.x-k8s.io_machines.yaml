@@ -22,15 +22,15 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: Provider ID
-      jsonPath: .spec.providerID
+      JSONPath: .spec.providerID
       name: ProviderID
       type: string
     - description: Machine status such as Terminating/Pending/Running/Failed etc
-      jsonPath: .status.phase
+      JSONPath: .status.phase
       name: Phase
       type: string
     - description: Node name associated with this machine
-      jsonPath: .status.nodeRef.name
+      JSONPath: .status.nodeRef.name
       name: NodeName
       priority: 1
       type: string
@@ -376,15 +376,15 @@ spec:
       status: {}
   - additionalPrinterColumns:
     - description: Provider ID
-      jsonPath: .spec.providerID
+      JSONPath: .spec.providerID
       name: ProviderID
       type: string
     - description: Machine status such as Terminating/Pending/Running/Failed etc
-      jsonPath: .status.phase
+      JSONPath: .status.phase
       name: Phase
       type: string
     - description: Node name associated with this machine
-      jsonPath: .status.nodeRef.name
+      JSONPath: .status.nodeRef.name
       name: NodeName
       priority: 1
       type: string

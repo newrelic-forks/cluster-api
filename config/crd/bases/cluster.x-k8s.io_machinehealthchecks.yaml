@@ -23,15 +23,15 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: Maximum number of unhealthy machines allowed
-      jsonPath: .spec.maxUnhealthy
+      JSONPath: .spec.maxUnhealthy
       name: MaxUnhealthy
       type: string
     - description: Number of machines currently monitored
-      jsonPath: .status.expectedMachines
+      JSONPath: .status.expectedMachines
       name: ExpectedMachines
       type: integer
     - description: Current observed healthy machines
-      jsonPath: .status.currentHealthy
+      JSONPath: .status.currentHealthy
       name: CurrentHealthy
       type: integer
     name: v1alpha3
