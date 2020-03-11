@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/blang/semver v3.5.1+incompatible
+	github.com/coreos/etcd v3.3.15+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/distribution v2.7.1+incompatible
 	github.com/evanphx/json-patch v4.5.0+incompatible
@@ -31,15 +32,15 @@ require (
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	google.golang.org/grpc v1.23.1
-	k8s.io/api v0.0.0-20191121015604-11707872ac1c
-	k8s.io/apiextensions-apiserver v0.0.0-20190918161926-8f644eb6e783
-	k8s.io/apimachinery v0.0.0-20191121015412-41065c7a8c2a
-	k8s.io/apiserver v0.0.0-20190918160949-bfa5e2e684ad
-	k8s.io/client-go v0.0.0-20190918160344-1fbdaa4c8d90
+	k8s.io/api v0.17.2
+	k8s.io/apiextensions-apiserver v0.17.2
+	k8s.io/apimachinery v0.17.2
+	k8s.io/apiserver v0.17.2
+	k8s.io/client-go v0.17.2
 	k8s.io/cluster-bootstrap v0.0.0-20190516232516-d7d78ab2cfe7
-	k8s.io/component-base v0.0.0-20190918160511-547f6c5d7090
+	k8s.io/component-base v0.17.2
 	k8s.io/klog v1.0.0
-	k8s.io/utils v0.0.0-20191030222137-2b95a09bc58d
-	sigs.k8s.io/controller-runtime v0.4.0
+	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
+	sigs.k8s.io/controller-runtime v0.5.0
 	sigs.k8s.io/yaml v1.1.0
 )
