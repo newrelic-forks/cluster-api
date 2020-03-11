@@ -17,7 +17,7 @@ limitations under the License.
 package test
 
 import (
-	apiextensionslv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,7 +46,7 @@ func init() {
 	_ = clusterctlv1.AddToScheme(FakeScheme)
 	_ = clusterv1.AddToScheme(FakeScheme)
 	_ = expv1.AddToScheme(FakeScheme)
-	_ = apiextensionslv1.AddToScheme(FakeScheme)
+	_ = apiextensionsv1beta1.AddToScheme(FakeScheme)
 
 	_ = fakebootstrap.AddToScheme(FakeScheme)
 	_ = fakecontrolplane.AddToScheme(FakeScheme)

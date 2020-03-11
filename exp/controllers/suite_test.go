@@ -25,7 +25,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -54,7 +54,7 @@ func init() {
 	logf.SetLogger(klogr.New())
 
 	// Register required object kinds with global scheme.
-	_ = apiextensionsv1.AddToScheme(scheme.Scheme)
+	_ = apiextensionsv1beta1.AddToScheme(scheme.Scheme)
 	_ = clusterv1.AddToScheme(scheme.Scheme)
 	_ = expv1.AddToScheme(scheme.Scheme)
 }

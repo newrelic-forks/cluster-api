@@ -21,7 +21,7 @@ import (
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -176,7 +176,7 @@ func (o *objectGraph) getDiscoveryTypes() ([]metav1.TypeMeta, error) {
 		return nil, err
 	}
 
-	crdList := &apiextensionsv1.CustomResourceDefinitionList{}
+	crdList := &apiextensionsv1beta1.CustomResourceDefinitionList{}
 	if err := c.List(ctx, crdList, client.MatchingLabels{clusterctlv1.ClusterctlLabelName: ""}); err != nil {
 		return nil, errors.Wrap(err, "failed to get the list of CRDs required for the move discovery phase")
 	}

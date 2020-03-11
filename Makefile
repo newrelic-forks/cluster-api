@@ -263,13 +263,9 @@ generate-core-manifests: $(CONTROLLER_GEN) ## Generate manifests for the core pr
 	$(CONTROLLER_GEN) \
 		paths=./api/... \
 		paths=./controllers/... \
-<<<<<<< HEAD
 		paths=./$(EXP_DIR)/api/... \
 		paths=./$(EXP_DIR)/controllers/... \
 		crd:crdVersions=v1 \
-=======
-		crd:preserveUnknownFields=false \
->>>>>>> parent of c39251437... ✨ Update and require CRDv1
 		rbac:roleName=manager-role \
 		output:crd:dir=./config/crd/bases \
 		output:webhook:dir=./config/webhook \

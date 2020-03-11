@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -136,7 +136,7 @@ func (p *inventoryClient) EnsureCustomResourceDefinitions() error {
 		}
 
 		// If the object is a CRDs, waits for it being Established.
-		if apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinition").GroupKind() == o.GroupVersionKind().GroupKind() {
+		if apiextensionsv1beta1.SchemeGroupVersion.WithKind("CustomResourceDefinition").GroupKind() == o.GroupVersionKind().GroupKind() {
 			crdKey, err := client.ObjectKeyFromObject(&o)
 			if err != nil {
 				return nil
@@ -148,13 +148,13 @@ func (p *inventoryClient) EnsureCustomResourceDefinitions() error {
 					return false, err
 				}
 
-				crd := &apiextensionsv1.CustomResourceDefinition{}
+				crd := &apiextensionsv1beta1.CustomResourceDefinition{}
 				if err := c.Get(ctx, crdKey, crd); err != nil {
 					return false, err
 				}
 
 				for _, c := range crd.Status.Conditions {
-					if c.Type == apiextensionsv1.Established && c.Status == apiextensionsv1.ConditionTrue {
+					if c.Type == apiextensionsv1beta1.Established && c.Status == apiextensionsv1beta1.ConditionTrue {
 						return true, nil
 					}
 				}

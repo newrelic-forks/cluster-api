@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -70,7 +70,7 @@ func init() {
 	_ = clusterv1alpha2.AddToScheme(scheme)
 	_ = clusterv1alpha3.AddToScheme(scheme)
 	_ = expv1alpha3.AddToScheme(scheme)
-	_ = apiextensionsv1.AddToScheme(scheme)
+	_ = apiextensionsv1beta1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 

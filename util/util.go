@@ -27,7 +27,7 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -379,8 +379,8 @@ func IsPaused(cluster *clusterv1.Cluster, v metav1.Object) bool {
 // GetCRDWithContract retrieves a list of CustomResourceDefinitions from using controller-runtime Client,
 // filtering with the `contract` label passed in.
 // Returns the first CRD in the list that matches the GroupVersionKind, otherwise returns an error.
-func GetCRDWithContract(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, contract string) (*apiextensionsv1.CustomResourceDefinition, error) {
-	crdList := &apiextensionsv1.CustomResourceDefinitionList{}
+func GetCRDWithContract(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, contract string) (*apiextensionsv1beta1.CustomResourceDefinition, error) {
+	crdList := &apiextensionsv1beta1.CustomResourceDefinitionList{}
 	for {
 		if err := c.List(ctx, crdList, client.Continue(crdList.Continue), client.HasLabels{contract}); err != nil {
 			return nil, errors.Wrapf(err, "failed to list CustomResourceDefinitions for %v", gvk)
