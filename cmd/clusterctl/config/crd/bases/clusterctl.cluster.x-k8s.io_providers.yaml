@@ -9,8 +9,11 @@ metadata:
   name: providers.clusterctl.cluster.x-k8s.io
 spec:
   additionalPrinterColumns:
-  - JSONPath: .type
+  - JSONPath: .provider
     name: Type
+    type: string
+  - JSONPath: .type
+    name: Provider
     type: string
   - JSONPath: .version
     name: Version
@@ -31,7 +34,7 @@ spec:
   subresources: {}
   validation:
     openAPIV3Schema:
-      description: Provider is the Schema for the providers API
+      description: Provider defines an entry in the provider inventory.
       properties:
         apiVersion:
           description: 'APIVersion defines the versioned schema of this representation
@@ -45,6 +48,9 @@ spec:
           type: string
         metadata:
           type: object
+        providerName:
+          description: ProviderName indicates the name of the provider.
+          type: string
         type:
           description: Type indicates the type of the provider. See ProviderType for
             a list of supported values
@@ -60,52 +66,7 @@ spec:
       type: object
   version: v1alpha3
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .provider
-      name: Type
-      type: string
-    - jsonPath: .type
-      name: Provider
-      type: string
-    - jsonPath: .version
-      name: Version
-      type: string
-    - jsonPath: .watchedNamespace
-      name: Watch Namespace
-      type: string
-    name: v1alpha3
-    schema:
-      openAPIV3Schema:
-        description: Provider defines an entry in the provider inventory.
-        properties:
-          apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
-            type: string
-          kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
-            type: string
-          metadata:
-            type: object
-          providerName:
-            description: ProviderName indicates the name of the provider.
-            type: string
-          type:
-            description: Type indicates the type of the provider. See ProviderType
-              for a list of supported values
-            type: string
-          version:
-            description: Version indicates the component version.
-            type: string
-          watchedNamespace:
-            description: WatchedNamespace indicates the namespace where the provider
-              controller is is watching. if empty the provider controller is watching
-              for objects in all namespaces.
-            type: string
-        type: object
+  - name: v1alpha3
     served: true
     storage: true
 status:

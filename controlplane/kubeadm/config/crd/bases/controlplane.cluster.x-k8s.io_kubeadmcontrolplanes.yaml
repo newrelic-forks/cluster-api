@@ -807,86 +807,164 @@ spec:
                             type: object
                           type: array
                       type: object
-                    type: array
-                  verbosity:
-                    description: Verbosity is the number for the kubeadm log level
-                      verbosity. It overrides the `--v` flag in kubeadm commands.
-                    format: int32
-                    type: integer
-                type: object
-              replicas:
-                description: Number of desired machines. Defaults to 1. When stacked
-                  etcd is used only odd numbers are permitted, as per [etcd best practice](https://etcd.io/docs/v3.3.12/faq/#why-an-odd-number-of-cluster-members).
-                  This is a pointer to distinguish between explicit zero and not specified.
-                format: int32
-                type: integer
-              upgradeAfter:
-                description: UpgradeAfter is a field to indicate an upgrade should
-                  be performed after the specified time even if no changes have been
-                  made to the KubeadmControlPlane
-                format: date-time
-                type: string
-              version:
-                description: Version defines the desired Kubernetes version.
-                minLength: 1
-                type: string
-            required:
-            - infrastructureTemplate
-            - kubeadmConfigSpec
-            - version
-            type: object
-          status:
-            description: KubeadmControlPlaneStatus defines the observed state of KubeadmControlPlane.
-            properties:
-              failureMessage:
-                description: ErrorMessage indicates that there is a terminal problem
-                  reconciling the state, and will be set to a descriptive error message.
-                type: string
-              failureReason:
-                description: FailureReason indicates that there is a terminal problem
-                  reconciling the state, and will be set to a token value suitable
-                  for programmatic interpretation.
-                type: string
-              initialized:
-                description: Initialized denotes whether or not the control plane
-                  has the uploaded kubeadm-config configmap.
-                type: boolean
-              ready:
-                description: Ready denotes that the KubeadmControlPlane API Server
-                  is ready to receive requests.
-                type: boolean
-              readyReplicas:
-                description: Total number of fully running and ready control plane
-                  machines.
-                format: int32
-                type: integer
-              replicas:
-                description: Total number of non-terminated machines targeted by this
-                  control plane (their labels match the selector).
-                format: int32
-                type: integer
-              selector:
-                description: 'Selector is the label selector in string format to avoid
-                  introspection by clients, and is used to provide the CRD-based integration
-                  for the scale subresource and additional integrations for things
-                  like kubectl describe.. The string will be in the same format as
-                  the query-param syntax. More info about label selectors: http://kubernetes.io/docs/user-guide/labels#label-selectors'
-                type: string
-              unavailableReplicas:
-                description: Total number of unavailable machines targeted by this
-                  control plane. This is the total number of machines that are still
-                  required for the deployment to have 100% available capacity. They
-                  may either be machines that are running but not yet ready or machines
-                  that still have not been created.
-                format: int32
-                type: integer
-              updatedReplicas:
-                description: Total number of non-terminated machines targeted by this
-                  control plane that have the desired template spec.
-                format: int32
-                type: integer
-            type: object
-        type: object
+                  required:
+                  - nodeRegistration
+                  type: object
+                ntp:
+                  description: NTP specifies NTP configuration
+                  properties:
+                    enabled:
+                      description: Enabled specifies whether NTP should be enabled
+                      type: boolean
+                    servers:
+                      description: Servers specifies which NTP servers to use
+                      items:
+                        type: string
+                      type: array
+                  type: object
+                postKubeadmCommands:
+                  description: PostKubeadmCommands specifies extra commands to run
+                    after kubeadm runs
+                  items:
+                    type: string
+                  type: array
+                preKubeadmCommands:
+                  description: PreKubeadmCommands specifies extra commands to run
+                    before kubeadm runs
+                  items:
+                    type: string
+                  type: array
+                users:
+                  description: Users specifies extra users to add
+                  items:
+                    description: User defines the input for a generated user in cloud-init.
+                    properties:
+                      gecos:
+                        description: Gecos specifies the gecos to use for the user
+                        type: string
+                      groups:
+                        description: Groups specifies the additional groups for the
+                          user
+                        type: string
+                      homeDir:
+                        description: HomeDir specifies the home directory to use for
+                          the user
+                        type: string
+                      inactive:
+                        description: Inactive specifies whether to mark the user as
+                          inactive
+                        type: boolean
+                      lockPassword:
+                        description: LockPassword specifies if password login should
+                          be disabled
+                        type: boolean
+                      name:
+                        description: Name specifies the user name
+                        type: string
+                      passwd:
+                        description: Passwd specifies a hashed password for the user
+                        type: string
+                      primaryGroup:
+                        description: PrimaryGroup specifies the primary group for
+                          the user
+                        type: string
+                      shell:
+                        description: Shell specifies the user's shell
+                        type: string
+                      sshAuthorizedKeys:
+                        description: SSHAuthorizedKeys specifies a list of ssh authorized
+                          keys for the user
+                        items:
+                          type: string
+                        type: array
+                      sudo:
+                        description: Sudo specifies a sudo role for the user
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  type: array
+                verbosity:
+                  description: Verbosity is the number for the kubeadm log level verbosity.
+                    It overrides the `--v` flag in kubeadm commands.
+                  format: int32
+                  type: integer
+              type: object
+            replicas:
+              description: Number of desired machines. Defaults to 1. When stacked
+                etcd is used only odd numbers are permitted, as per [etcd best practice](https://etcd.io/docs/v3.3.12/faq/#why-an-odd-number-of-cluster-members).
+                This is a pointer to distinguish between explicit zero and not specified.
+              format: int32
+              type: integer
+            upgradeAfter:
+              description: UpgradeAfter is a field to indicate an upgrade should be
+                performed after the specified time even if no changes have been made
+                to the KubeadmControlPlane
+              format: date-time
+              type: string
+            version:
+              description: Version defines the desired Kubernetes version.
+              minLength: 1
+              type: string
+          required:
+          - infrastructureTemplate
+          - kubeadmConfigSpec
+          - version
+          type: object
+        status:
+          description: KubeadmControlPlaneStatus defines the observed state of KubeadmControlPlane.
+          properties:
+            failureMessage:
+              description: ErrorMessage indicates that there is a terminal problem
+                reconciling the state, and will be set to a descriptive error message.
+              type: string
+            failureReason:
+              description: FailureReason indicates that there is a terminal problem
+                reconciling the state, and will be set to a token value suitable for
+                programmatic interpretation.
+              type: string
+            initialized:
+              description: Initialized denotes whether or not the control plane has
+                the uploaded kubeadm-config configmap.
+              type: boolean
+            ready:
+              description: Ready denotes that the KubeadmControlPlane API Server is
+                ready to receive requests.
+              type: boolean
+            readyReplicas:
+              description: Total number of fully running and ready control plane machines.
+              format: int32
+              type: integer
+            replicas:
+              description: Total number of non-terminated machines targeted by this
+                control plane (their labels match the selector).
+              format: int32
+              type: integer
+            selector:
+              description: 'Selector is the label selector in string format to avoid
+                introspection by clients, and is used to provide the CRD-based integration
+                for the scale subresource and additional integrations for things like
+                kubectl describe.. The string will be in the same format as the query-param
+                syntax. More info about label selectors: http://kubernetes.io/docs/user-guide/labels#label-selectors'
+              type: string
+            unavailableReplicas:
+              description: Total number of unavailable machines targeted by this control
+                plane. This is the total number of machines that are still required
+                for the deployment to have 100% available capacity. They may either
+                be machines that are running but not yet ready or machines that still
+                have not been created.
+              format: int32
+              type: integer
+            updatedReplicas:
+              description: Total number of non-terminated machines targeted by this
+                control plane that have the desired template spec.
+              format: int32
+              type: integer
+          type: object
+      type: object
+  version: v1alpha3
+  versions:
+  - name: v1alpha3
     served: true
     storage: true
 status:
