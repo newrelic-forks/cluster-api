@@ -242,14 +242,14 @@ func (r *KubeadmControlPlaneReconciler) reconcile(ctx context.Context, cluster *
 		return ctrl.Result{}, err
 	}
 
-	adoptableMachines := controlPlaneMachines.Filter(internal.AdoptableControlPlaneMachines(cluster.Name))
+	adoptableMachines := controlPlaneMachines.Filter(machinefilters.AdoptableControlPlaneMachines(cluster.Name))
 	if len(adoptableMachines) > 0 {
 		// We adopt the Machines and then wait for the update event for the ownership reference to re-queue them so the cache is up-to-date
 		err = r.adoptMachines(ctx, kcp, adoptableMachines, cluster)
 		return ctrl.Result{}, err
 	}
 
-	ownedMachines := controlPlaneMachines.Filter(internal.OwnedMachines(kcp))
+	ownedMachines := controlPlaneMachines.Filter(machinefilters.OwnedMachines(kcp))
 	if len(ownedMachines) != len(controlPlaneMachines) {
 		logger.Info("Not all control plane machines are owned by this KubeadmControlPlane, refusing to operate in mixed management mode")
 		return ctrl.Result{}, nil
@@ -569,7 +569,7 @@ func (r *KubeadmControlPlaneReconciler) scaleDownControlPlane(ctx context.Contex
 	}
 
 	if !machinefilters.HasAnnotationKey(controlplanev1.ScaleDownConfigMapEntryRemovedAnnotation)(machineToDelete) {
-		if err := r.managementCluster.TargetClusterControlPlaneIsHealthy(ctx, util.ObjectKey(cluster), kcp.Name); err != nil {
+		if err := r.managementCluster.TargetClusterControlPlaneIsHealthy(ctx, util.ObjectKey(cluster)); err != nil {
 			logger.Error(err, "waiting for control plane to pass control plane health check before removing a control plane machine")
 			r.recorder.Eventf(kcp, corev1.EventTypeWarning, "ControlPlaneUnhealthy", "Waiting for control plane to pass control plane health check before removing a control plane machine: %v", err)
 			return ctrl.Result{}, &capierrors.RequeueAfterError{RequeueAfter: HealthCheckFailedRequeueAfter}
