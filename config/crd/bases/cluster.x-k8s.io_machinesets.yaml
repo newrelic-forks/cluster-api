@@ -19,6 +19,7 @@ spec:
     - ms
     singular: machineset
   scope: Namespaced
+  preserveUnknownFields: false
   versions:
   - name: v1alpha2
     schema:

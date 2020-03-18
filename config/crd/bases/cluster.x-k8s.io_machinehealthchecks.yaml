@@ -20,6 +20,7 @@ spec:
     - mhcs
     singular: machinehealthcheck
   scope: Namespaced
+  preserveUnknownFields: false
   additionalPrinterColumns:
   - description: Maximum number of unhealthy machines allowed
     JSONPath: .spec.maxUnhealthy

@@ -19,6 +19,7 @@ spec:
     - ma
     singular: machine
   scope: Namespaced
+  preserveUnknownFields: false
   additionalPrinterColumns:
     - description: Provider ID
       JSONPath: .spec.providerID
