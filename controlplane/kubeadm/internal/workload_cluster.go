@@ -40,12 +40,12 @@ import (
 	etcdutil "sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/etcd/util"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/certs"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	kubeProxyDaemonSetName = "kube-proxy"
+	kubeProxyKey = "kube-proxy"
 )
 
 var (
@@ -53,7 +53,7 @@ var (
 )
 
 type etcdClientFor interface {
-	forNode(name string) (*etcd.Client, error)
+	forNode(ctx context.Context, name string) (*etcd.Client, error)
 }
 
 // WorkloadCluster defines all behaviors necessary to upgrade kubernetes on a workload cluster
@@ -74,6 +74,7 @@ type WorkloadCluster interface {
 	UpdateCoreDNS(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane) error
 	RemoveEtcdMemberForMachine(ctx context.Context, machine *clusterv1.Machine) error
 	RemoveMachineFromKubeadmConfigMap(ctx context.Context, machine *clusterv1.Machine) error
+	ForwardEtcdLeadership(ctx context.Context, machine *clusterv1.Machine, leaderCandidate *clusterv1.Machine) error
 }
 
 // Workload defines operations on workload clusters.
@@ -129,9 +130,8 @@ func (w *Workload) ControlPlaneIsHealthy(ctx context.Context) (HealthCheckResult
 			Namespace: metav1.NamespaceSystem,
 			Name:      staticPodName("kube-apiserver", name),
 		}
-
-		apiServerPod := &corev1.Pod{}
-		if err := w.Client.Get(ctx, apiServerPodKey, apiServerPod); err != nil {
+		apiServerPod := corev1.Pod{}
+		if err := w.Client.Get(ctx, apiServerPodKey, &apiServerPod); err != nil {
 			response[name] = err
 			continue
 		}
@@ -141,8 +141,8 @@ func (w *Workload) ControlPlaneIsHealthy(ctx context.Context) (HealthCheckResult
 			Namespace: metav1.NamespaceSystem,
 			Name:      staticPodName("kube-controller-manager", name),
 		}
-		controllerManagerPod := &corev1.Pod{}
-		if err := w.Client.Get(ctx, controllerManagerPodKey, controllerManagerPod); err != nil {
+		controllerManagerPod := corev1.Pod{}
+		if err := w.Client.Get(ctx, controllerManagerPodKey, &controllerManagerPod); err != nil {
 			response[name] = err
 			continue
 		}
@@ -169,7 +169,7 @@ func (w *Workload) removeMemberForNode(ctx context.Context, name string) error {
 	if anotherNode == nil {
 		return errors.Errorf("failed to find a control plane node whose name is not %s", name)
 	}
-	etcdClient, err := w.etcdClientGenerator.forNode(anotherNode.Name)
+	etcdClient, err := w.etcdClientGenerator.forNode(ctx, anotherNode.Name)
 	if err != nil {
 		return errors.Wrap(err, "failed to create etcd client")
 	}
@@ -206,6 +206,7 @@ func (w *Workload) EtcdIsHealthy(ctx context.Context) (HealthCheckResult, error)
 		return nil, err
 	}
 
+	expectedMembers := 0
 	response := make(map[string]error)
 	for _, node := range controlPlaneNodes.Items {
 		name := node.Name
@@ -215,8 +216,28 @@ func (w *Workload) EtcdIsHealthy(ctx context.Context) (HealthCheckResult, error)
 			continue
 		}
 
+		// Check to see if the pod is ready
+		etcdPodKey := ctrlclient.ObjectKey{
+			Namespace: metav1.NamespaceSystem,
+			Name:      staticPodName("etcd", name),
+		}
+		pod := corev1.Pod{}
+		if err := w.Client.Get(ctx, etcdPodKey, &pod); err != nil {
+			response[name] = errors.Wrap(err, "failed to get etcd pod")
+			continue
+		}
+		if err := checkStaticPodReadyCondition(pod); err != nil {
+			// Nothing wrong here, etcd on this node is just not running.
+			// If it's a true failure the healthcheck will fail since it won't have checked enough members.
+			continue
+		}
+		// Only expect a member reports healthy if its pod is ready.
+		// This fixes the known state where the control plane has a crash-looping etcd pod that is not part of the
+		// etcd cluster.
+		expectedMembers++
+
 		// Create the etcd Client for the etcd Pod scheduled on the Node
-		etcdClient, err := w.etcdClientGenerator.forNode(name)
+		etcdClient, err := w.etcdClientGenerator.forNode(ctx, name)
 		if err != nil {
 			response[name] = errors.Wrap(err, "failed to create etcd client")
 			continue
@@ -258,10 +279,12 @@ func (w *Workload) EtcdIsHealthy(ctx context.Context) (HealthCheckResult, error)
 		}
 	}
 
-	// Check that there is exactly one etcd member for every control plane machine.
-	// There should be no etcd members added "out of band.""
-	if len(controlPlaneNodes.Items) != len(knownMemberIDSet) {
-		return response, errors.Errorf("there are %d control plane nodes, but %d etcd members", len(controlPlaneNodes.Items), len(knownMemberIDSet))
+	// TODO: ensure that each pod is owned by a node that we're managing. That would ensure there are no out-of-band etcd members
+
+	// Check that there is exactly one etcd member for every healthy pod.
+	// This allows us to handle the expected case where there is a failing pod but it's been removed from the member list.
+	if expectedMembers != len(knownMemberIDSet) {
+		return response, errors.Errorf("there are %d healthy etcd pods, but %d etcd members", expectedMembers, len(knownMemberIDSet))
 	}
 
 	return response, nil
@@ -488,6 +511,60 @@ func (w *Workload) ClusterStatus(ctx context.Context) (ClusterStatus, error) {
 	return status, nil
 }
 
+// ForwardEtcdLeadership forwards etcd leadership to the first follower
+func (w *Workload) ForwardEtcdLeadership(ctx context.Context, machine *clusterv1.Machine, leaderCandidate *clusterv1.Machine) error {
+	if machine == nil || machine.Status.NodeRef == nil {
+		// Nothing to do, no node for Machine
+		return nil
+	}
+
+	// TODO we'd probably prefer to pass in all the known nodes and let grpc handle retrying connections across them
+	clientMachineName := machine.Status.NodeRef.Name
+	if leaderCandidate != nil && leaderCandidate.Status.NodeRef != nil {
+		// connect to the new leader candidate, in case machine's etcd membership has already been removed
+		clientMachineName = leaderCandidate.Status.NodeRef.Name
+	}
+
+	etcdClient, err := w.etcdClientGenerator.forNode(ctx, clientMachineName)
+	if err != nil {
+		return errors.Wrap(err, "failed to create etcd Client")
+	}
+
+	// List etcd members. This checks that the member is healthy, because the request goes through consensus.
+	members, err := etcdClient.Members(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to list etcd members using etcd client")
+	}
+
+	currentMember := etcdutil.MemberForName(members, machine.Status.NodeRef.Name)
+	if currentMember == nil || currentMember.ID != etcdClient.LeaderID {
+		return nil
+	}
+
+	// If we don't have a leader candidate, move the leader to the next available machine.
+	if leaderCandidate == nil || leaderCandidate.Status.NodeRef == nil {
+		for _, member := range members {
+			if member.ID != currentMember.ID {
+				if err := etcdClient.MoveLeader(ctx, member.ID); err != nil {
+					return errors.Wrapf(err, "failed to move leader")
+				}
+				break
+			}
+		}
+		return nil
+	}
+
+	// Move the leader to the provided candidate.
+	nextLeader := etcdutil.MemberForName(members, leaderCandidate.Status.NodeRef.Name)
+	if nextLeader == nil {
+		return errors.Errorf("failed to get etcd member from node %q", leaderCandidate.Status.NodeRef.Name)
+	}
+	if err := etcdClient.MoveLeader(ctx, nextLeader.ID); err != nil {
+		return errors.Wrapf(err, "failed to move leader")
+	}
+	return nil
+}
+
 func generateClientCert(caCertEncoded, caKeyEncoded []byte) (tls.Certificate, error) {
 	privKey, err := certs.NewPrivateKey()
 	if err != nil {
@@ -540,7 +617,7 @@ func staticPodName(component, nodeName string) string {
 	return fmt.Sprintf("%s-%s", component, nodeName)
 }
 
-func checkStaticPodReadyCondition(pod *corev1.Pod) error {
+func checkStaticPodReadyCondition(pod corev1.Pod) error {
 	found := false
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady {
@@ -578,28 +655,50 @@ func firstNodeNotMatchingName(name string, nodes []corev1.Node) *corev1.Node {
 func (w *Workload) UpdateKubeProxyImageInfo(ctx context.Context, kcp *controlplanev1.KubeadmControlPlane) error {
 	ds := &appsv1.DaemonSet{}
 
-	if err := w.Client.Get(ctx, ctrlclient.ObjectKey{Name: kubeProxyDaemonSetName, Namespace: metav1.NamespaceSystem}, ds); err != nil {
+	if err := w.Client.Get(ctx, ctrlclient.ObjectKey{Name: kubeProxyKey, Namespace: metav1.NamespaceSystem}, ds); err != nil {
 		if apierrors.IsNotFound(err) {
 			// if kube-proxy is missing, return without errors
 			return nil
 		}
-		return errors.Wrapf(err, "failed to determine if %s daemonset already exists", kubeProxyDaemonSetName)
+		return errors.Wrapf(err, "failed to determine if %s daemonset already exists", kubeProxyKey)
 	}
 
-	if len(ds.Spec.Template.Spec.Containers) == 0 {
+	container := findKubeProxyContainer(ds)
+	if container == nil {
 		return nil
 	}
-	newImageName, err := util.ModifyImageTag(ds.Spec.Template.Spec.Containers[0].Image, kcp.Spec.Version)
+
+	newImageName, err := util.ModifyImageTag(container.Image, kcp.Spec.Version)
 	if err != nil {
 		return err
 	}
 
-	if ds.Spec.Template.Spec.Containers[0].Image != newImageName {
-		patch := client.MergeFrom(ds.DeepCopy())
-		ds.Spec.Template.Spec.Containers[0].Image = newImageName
-		if err := w.Client.Patch(ctx, ds, patch); err != nil {
-			return errors.Wrap(err, "error patching kube-proxy DaemonSet")
+	if container.Image != newImageName {
+		helper, err := patch.NewHelper(ds, w.Client)
+		if err != nil {
+			return err
+		}
+		patchKubeProxyImage(ds, newImageName)
+		return helper.Patch(ctx, ds)
+	}
+	return nil
+}
+
+func findKubeProxyContainer(ds *appsv1.DaemonSet) *corev1.Container {
+	containers := ds.Spec.Template.Spec.Containers
+	for idx := range containers {
+		if containers[idx].Name == kubeProxyKey {
+			return &containers[idx]
 		}
 	}
 	return nil
+}
+
+func patchKubeProxyImage(ds *appsv1.DaemonSet, image string) {
+	containers := ds.Spec.Template.Spec.Containers
+	for idx := range containers {
+		if containers[idx].Name == kubeProxyKey {
+			containers[idx].Image = image
+		}
+	}
 }

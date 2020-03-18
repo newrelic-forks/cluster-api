@@ -30,7 +30,6 @@ const (
 	SelectedForUpgradeAnnotation             = "kubeadm.controlplane.cluster.x-k8s.io/selected-for-upgrade"
 	UpgradeReplacementCreatedAnnotation      = "kubeadm.controlplane.cluster.x-k8s.io/upgrade-replacement-created"
 	DeleteForScaleDownAnnotation             = "kubeadm.controlplane.cluster.x-k8s.io/delete-for-scale-down"
-	ScaleDownEtcdMemberRemovedAnnotation     = "kubeadm.controlplane.cluster.x-k8s.io/scale-down-etcd-member-removed"
 	ScaleDownConfigMapEntryRemovedAnnotation = "kubeadm.controlplane.cluster.x-k8s.io/scale-down-configmap-entry-removed"
 )
 
@@ -43,7 +42,8 @@ type KubeadmControlPlaneSpec struct {
 	Replicas *int32 `json:"replicas,omitempty"`
 
 	// Version defines the desired Kubernetes version.
-	// +kubebuilder:validation:MinLength:=1
+	// +kubebuilder:validation:MinLength:=2
+	// +kubebuilder:validation:Pattern:=^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-0-9a-zA-Z_\.+]*)?$
 	Version string `json:"version"`
 
 	// InfrastructureTemplate is a required reference to a custom resource

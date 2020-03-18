@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/machinefilters"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -55,7 +56,7 @@ func TestCheckStaticPodReadyCondition(t *testing.T) {
 	}
 	for _, test := range table {
 		t.Run(test.name, func(t *testing.T) {
-			pod := &corev1.Pod{
+			pod := corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-pod",
 				},
@@ -81,7 +82,7 @@ func TestCheckStaticPodNotReadyCondition(t *testing.T) {
 	}
 	for _, test := range table {
 		t.Run(test.name, func(t *testing.T) {
-			pod := &corev1.Pod{
+			pod := corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-pod",
 				},
@@ -130,12 +131,16 @@ func TestControlPlaneIsHealthy(t *testing.T) {
 	}
 }
 
-func nodeNamed(name string) corev1.Node {
-	return corev1.Node{
+func nodeNamed(name string, options ...func(n corev1.Node) corev1.Node) corev1.Node {
+	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 	}
+	for _, opt := range options {
+		node = opt(node)
+	}
+	return node
 }
 
 func nodeListForTestControlPlaneIsHealthy() *corev1.NodeList {
@@ -165,7 +170,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	}
 
 	// Test the ControlPlaneMachines works
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"))
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, machinefilters.ControlPlaneMachines("my-cluster"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +182,7 @@ func TestGetMachinesForCluster(t *testing.T) {
 	nameFilter := func(cluster *clusterv1.Machine) bool {
 		return cluster.Name == "first-machine"
 	}
-	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, ControlPlaneMachines("my-cluster"), nameFilter)
+	machines, err = m.GetMachinesForCluster(context.Background(), clusterKey, machinefilters.ControlPlaneMachines("my-cluster"), nameFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +269,8 @@ func (f *fakeClient) List(_ context.Context, list runtime.Object, _ ...client.Li
 		l.DeepCopyInto(list.(*clusterv1.MachineList))
 	case *corev1.NodeList:
 		l.DeepCopyInto(list.(*corev1.NodeList))
+	case *corev1.PodList:
+		l.DeepCopyInto(list.(*corev1.PodList))
 	default:
 		return fmt.Errorf("unknown type: %s", l)
 	}

@@ -6,7 +6,6 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/coredns/corefile-migration v1.0.6
-	github.com/coreos/etcd v3.3.15+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/distribution v2.7.1+incompatible
 	github.com/evanphx/json-patch v4.5.0+incompatible
@@ -39,9 +38,7 @@ require (
 	k8s.io/component-base v0.17.2
 	k8s.io/klog v1.0.0
 	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
-	sigs.k8s.io/cluster-api-bootstrap-provider-kubeadm v0.1.6 // indirect
 	sigs.k8s.io/cluster-api/test/framework v0.0.0-20200304170348-97097699f713 // indirect
-	sigs.k8s.io/cluster-api/test/infrastructure/docker v0.0.0-20200311154737-54260061ddce // indirect
 	sigs.k8s.io/controller-runtime v0.5.0
 	sigs.k8s.io/yaml v1.2.0
 )

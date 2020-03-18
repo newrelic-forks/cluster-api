@@ -18,11 +18,11 @@ package client
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
+	. "github.com/onsi/gomega"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
@@ -31,6 +31,8 @@ import (
 )
 
 func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
+	g := NewWithT(t)
+
 	type fields struct {
 		client *fakeClient
 	}
@@ -163,24 +165,20 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.fields.client.ApplyUpgrade(tt.args.options); (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
+			err := tt.fields.client.ApplyUpgrade(tt.args.options)
 			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
 				return
 			}
+			g.Expect(err).NotTo(HaveOccurred())
 
 			proxy := tt.fields.client.clusters["kubeconfig"].Proxy()
 			gotProviders := &clusterctlv1.ProviderList{}
 
 			c, err := proxy.NewClient()
-			if err != nil {
-				t.Fatalf("failed to create client %v", err)
-			}
+			g.Expect(err).NotTo(HaveOccurred())
 
-			if err := c.List(context.TODO(), gotProviders); err != nil {
-				t.Fatalf("failed to read providers %v", err)
-			}
+			g.Expect(c.List(context.Background(), gotProviders)).To(Succeed())
 
 			sort.Slice(gotProviders.Items, func(i, j int) bool {
 				return gotProviders.Items[i].Name < gotProviders.Items[j].Name
@@ -192,10 +190,7 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 				tt.wantProviders.Items[i].ResourceVersion = gotProviders.Items[i].ResourceVersion
 			}
 
-			if !reflect.DeepEqual(gotProviders, tt.wantProviders) {
-				spew.Dump(gotProviders, tt.wantProviders)
-				t.Errorf("got = %v, want %v", gotProviders, tt.wantProviders)
-			}
+			g.Expect(gotProviders).To(Equal(tt.wantProviders))
 		})
 	}
 }
@@ -266,6 +261,8 @@ func fakeProvider(name string, providerType clusterctlv1.ProviderType, version, 
 }
 
 func Test_parseUpgradeItem(t *testing.T) {
+	g := NewWithT(t)
+
 	type args struct {
 		provider string
 	}
@@ -331,17 +328,13 @@ func Test_parseUpgradeItem(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parseUpgradeItem(tt.args.provider, clusterctlv1.CoreProviderType)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
 			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
 				return
 			}
+			g.Expect(err).NotTo(HaveOccurred())
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got = %v, want %v", got, tt.want)
-			}
-
+			g.Expect(got).To(Equal(tt.want))
 		})
 	}
 }

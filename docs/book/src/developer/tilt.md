@@ -12,7 +12,7 @@ workflow that offers easy deployments and rapid iterative builds.
    (other clusters can be used if `preload_images_for_kind` is set to false)
 1. [kustomize](https://github.com/kubernetes-sigs/kustomize/blob/master/docs/INSTALL.md) standalone
    (`kubectl kustomize` does not work because it is missing some features of kustomize v3)
-1. [Tilt](https://docs.tilt.dev/install.html) v0.10.3 or newer
+1. [Tilt](https://docs.tilt.dev/install.html) v0.12.0 or newer
 1. Clone the [Cluster API](https://github.com/kubernetes-sigs/cluster-api) repository locally
 1. Clone the provider(s) you want to deploy locally as well
 
@@ -57,7 +57,7 @@ for more details.
 **kustomize_substitutions** (Map{String: String}, default={}): An optional map of substitutions for `${}`-style placeholders in the
 provider's yaml.
 
-{{#tabs name:"tab-tilt-kustomize-substitution" tabs:"AWS,GCP"}}
+{{#tabs name:"tab-tilt-kustomize-substitution" tabs:"AWS,Azure,GCP"}}
 {{#tab AWS}}
 
 For example, if the yaml contains `${AWS_B64ENCODED_CREDENTIALS}`, you could do the following:
@@ -65,20 +65,6 @@ For example, if the yaml contains `${AWS_B64ENCODED_CREDENTIALS}`, you could do 
 ```json
 "kustomize_substitutions": {
   "AWS_B64ENCODED_CREDENTIALS": "your credentials here"
-}
-```
-
-{{#/tab }}
-{{#tab GCP}}
-
-You can generate a base64 version of your GCP json credentials file using:
-```bash
-base64 -i ~/path/to/gcp/credentials.json
-```
-
-```json
-"kustomize_substitutions": {
-  "GCP_B64ENCODED_CREDENTIALS": "your credentials here"
 }
 ```
 
@@ -119,6 +105,20 @@ Add the output of the following as a section in your `tilt-settings.json`:
      "AZURE_CLIENT_ID_B64": "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
     }
   EOF
+```
+
+{{#/tab }}
+{{#tab GCP}}
+
+You can generate a base64 version of your GCP json credentials file using:
+```bash
+base64 -i ~/path/to/gcp/credentials.json
+```
+
+```json
+"kustomize_substitutions": {
+  "GCP_B64ENCODED_CREDENTIALS": "your credentials here"
+}
 ```
 
 {{#/tab }}

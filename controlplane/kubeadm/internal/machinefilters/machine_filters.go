@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package internal
+package machinefilters
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,10 +24,10 @@ import (
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 )
 
-type MachineFilter func(machine *clusterv1.Machine) bool
+type Func func(machine *clusterv1.Machine) bool
 
-// And returns a MachineFilter function that returns true if all of the given MachineFilters returns true
-func And(filters ...MachineFilter) MachineFilter {
+// And returns a filter that returns true if all of the given filters returns true.
+func And(filters ...Func) Func {
 	return func(machine *clusterv1.Machine) bool {
 		for _, f := range filters {
 			if !f(machine) {
@@ -38,8 +38,8 @@ func And(filters ...MachineFilter) MachineFilter {
 	}
 }
 
-// Or returns a MachineFilter function that returns true if any of the given MachineFilters returns true
-func Or(filters ...MachineFilter) MachineFilter {
+// Or returns a filter that returns true if any of the given filters returns true.
+func Or(filters ...Func) Func {
 	return func(machine *clusterv1.Machine) bool {
 		for _, f := range filters {
 			if f(machine) {
@@ -50,8 +50,8 @@ func Or(filters ...MachineFilter) MachineFilter {
 	}
 }
 
-// Not returns a MachineFilter function that returns the opposite of the given MachineFilter
-func Not(mf MachineFilter) MachineFilter {
+// Not returns a filter that returns the opposite of the given filter.
+func Not(mf Func) Func {
 	return func(machine *clusterv1.Machine) bool {
 		return !mf(machine)
 	}
@@ -69,7 +69,7 @@ var HasControllerRef = func(machine *clusterv1.Machine) bool {
 
 // InFailureDomains returns a MachineFilter function to find all machines
 // in any of the given failure domains
-func InFailureDomains(failureDomains ...*string) MachineFilter {
+func InFailureDomains(failureDomains ...*string) Func {
 	return func(machine *clusterv1.Machine) bool {
 		if machine == nil {
 			return false
@@ -137,9 +137,9 @@ func HasDeletionTimestamp(machine *clusterv1.Machine) bool {
 	return !machine.DeletionTimestamp.IsZero()
 }
 
-// MatchesConfigurationHash returns a MachineFilter function to find all machines
+// MatchesConfigurationHash returns a filter to find all machines
 // that match a given KubeadmControlPlane configuration hash.
-func MatchesConfigurationHash(configHash string) MachineFilter {
+func MatchesConfigurationHash(configHash string) Func {
 	return func(machine *clusterv1.Machine) bool {
 		if machine == nil {
 			return false
@@ -151,9 +151,9 @@ func MatchesConfigurationHash(configHash string) MachineFilter {
 	}
 }
 
-// OlderThan returns a MachineFilter function to find all machines
+// OlderThan returns a filter to find all machines
 // that have a CreationTimestamp earlier than the given time.
-func OlderThan(t *metav1.Time) MachineFilter {
+func OlderThan(t *metav1.Time) Func {
 	return func(machine *clusterv1.Machine) bool {
 		if machine == nil {
 			return false
@@ -162,9 +162,9 @@ func OlderThan(t *metav1.Time) MachineFilter {
 	}
 }
 
-// HasAnnotationKey returns a MachineFilter function to find all machines that have the
+// HasAnnotationKey returns a filter to find all machines that have the
 // specified Annotation key present
-func HasAnnotationKey(key string) MachineFilter {
+func HasAnnotationKey(key string) Func {
 	return func(machine *clusterv1.Machine) bool {
 		if machine == nil || machine.Annotations == nil {
 			return false

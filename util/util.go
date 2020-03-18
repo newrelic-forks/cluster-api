@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,7 +54,35 @@ var (
 	rnd                          = rand.New(rand.NewSource(time.Now().UnixNano()))
 	ErrNoCluster                 = fmt.Errorf("no %q label present", clusterv1.ClusterLabelName)
 	ErrUnstructuredFieldNotFound = fmt.Errorf("field not found")
+	ociTagAllowedChars           = regexp.MustCompile(`[^-a-zA-Z0-9_\.]`)
+	kubeSemver                   = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-0-9a-zA-Z_\.+]*)?$`)
 )
+
+// ParseMajorMinorPatch returns a semver.Version from the string provided
+// by looking only at major.minor.patch and stripping everything else out.
+func ParseMajorMinorPatch(version string) (semver.Version, error) {
+	groups := kubeSemver.FindStringSubmatch(version)
+	if len(groups) < 4 {
+		return semver.Version{}, errors.Errorf("failed to parse major.minor.patch from %q", version)
+	}
+	major, err := strconv.ParseUint(groups[1], 10, 64)
+	if err != nil {
+		return semver.Version{}, errors.Wrapf(err, "failed to parse major version from %q", version)
+	}
+	minor, err := strconv.ParseUint(groups[2], 10, 64)
+	if err != nil {
+		return semver.Version{}, errors.Wrapf(err, "failed to parse minor version from %q", version)
+	}
+	patch, err := strconv.ParseUint(groups[3], 10, 64)
+	if err != nil {
+		return semver.Version{}, errors.Wrapf(err, "failed to parse patch version from %q", version)
+	}
+	return semver.Version{
+		Major: major,
+		Minor: minor,
+		Patch: patch,
+	}, nil
+}
 
 // RandomString returns a random alphanumeric string.
 func RandomString(n int) string {
@@ -65,6 +95,8 @@ func RandomString(n int) string {
 
 // ModifyImageTag takes an imageName (e.g., registry/repo:tag), and returns an image name with updated tag
 func ModifyImageTag(imageName, tagName string) (string, error) {
+	normalisedTagName := SemverToOCIImageTag(tagName)
+
 	namedRef, err := reference.ParseNormalizedNamed(imageName)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to parse image name")
@@ -76,12 +108,17 @@ func ModifyImageTag(imageName, tagName string) (string, error) {
 	}
 
 	// update the image tag with tagName
-	namedTagged, err := reference.WithTag(namedRef, tagName)
+	namedTagged, err := reference.WithTag(namedRef, normalisedTagName)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to update image tag")
 	}
 
 	return reference.FamiliarString(reference.TagNameOnly(namedTagged)), nil
+}
+
+// ImageTagIsValid ensures that a given image tag is compliant with the OCI spec
+func ImageTagIsValid(tagName string) bool {
+	return !ociTagAllowedChars.MatchString(tagName)
 }
 
 // GetMachinesForCluster returns a list of machines associated with the cluster.
@@ -98,6 +135,17 @@ func GetMachinesForCluster(ctx context.Context, c client.Client, cluster *cluste
 		return nil, err
 	}
 	return &machines, nil
+}
+
+// SemVerToOCIImageTag is a helper function that replaces all
+// non-allowed symbols in tag strings with underscores.
+// Image tag can only contain lowercase and uppercase letters, digits,
+// underscores, periods and dashes.
+// Current usage is for CI images where all of symbols except '+' are valid,
+// but function is for generic usage where input can't be always pre-validated.
+// Taken from k8s.io/cmd/kubeadm/app/util
+func SemverToOCIImageTag(version string) string {
+	return ociTagAllowedChars.ReplaceAllString(version, "_")
 }
 
 // GetControlPlaneMachines returns a slice containing control plane machines.

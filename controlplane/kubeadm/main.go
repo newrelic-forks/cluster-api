@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -57,6 +58,9 @@ func init() {
 var (
 	metricsAddr                    string
 	enableLeaderElection           bool
+	leaderElectionLeaseDuration    time.Duration
+	leaderElectionRenewDeadline    time.Duration
+	leaderElectionRetryPeriod      time.Duration
 	watchNamespace                 string
 	profilerAddress                string
 	kubeadmControlPlaneConcurrency int
@@ -64,29 +68,42 @@ var (
 	webhookPort                    int
 )
 
-func main() {
-	flag.StringVar(&metricsAddr, "metrics-addr", ":8080",
+// InitFlags initializes the flags.
+func InitFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&metricsAddr, "metrics-addr", ":8080",
 		"The address the metric endpoint binds to.")
 
-	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
+	fs.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 
-	flag.StringVar(&watchNamespace, "namespace", "",
+	fs.DurationVar(&leaderElectionLeaseDuration, "leader-election-lease-duration", 15*time.Second,
+		"Interval at which non-leader candidates will wait to force acquire leadership (duration string)")
+
+	fs.DurationVar(&leaderElectionRenewDeadline, "leader-election-renew-deadline", 10*time.Second,
+		"Duration that the acting master will retry refreshing leadership before giving up (duration string)")
+
+	fs.DurationVar(&leaderElectionRetryPeriod, "leader-election-retry-period", 2*time.Second,
+		"Duration the LeaderElector clients should wait between tries of actions (duration string)")
+
+	fs.StringVar(&watchNamespace, "namespace", "",
 		"Namespace that the controller watches to reconcile cluster-api objects. If unspecified, the controller watches for cluster-api objects across all namespaces.")
 
-	flag.StringVar(&profilerAddress, "profiler-address", "",
+	fs.StringVar(&profilerAddress, "profiler-address", "",
 		"Bind address to expose the pprof profiler (e.g. localhost:6060)")
 
-	flag.IntVar(&kubeadmControlPlaneConcurrency, "kubeadmcontrolplane-concurrency", 10,
+	fs.IntVar(&kubeadmControlPlaneConcurrency, "kubeadmcontrolplane-concurrency", 10,
 		"Number of kubeadm control planes to process simultaneously")
 
-	flag.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
+	fs.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
 		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
 
-	flag.IntVar(&webhookPort, "webhook-port", 0,
+	fs.IntVar(&webhookPort, "webhook-port", 0,
 		"Webhook Server port, disabled by default. When enabled, the manager will only work as webhook server, no reconcilers are installed.")
-
-	flag.Parse()
+}
+func main() {
+	InitFlags(pflag.CommandLine)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	ctrl.SetLogger(klogr.New())
 
@@ -102,6 +119,9 @@ func main() {
 		MetricsBindAddress: metricsAddr,
 		LeaderElection:     enableLeaderElection,
 		LeaderElectionID:   "kubeadm-control-plane-manager-leader-election-capi",
+		LeaseDuration:      &leaderElectionLeaseDuration,
+		RenewDeadline:      &leaderElectionRenewDeadline,
+		RetryPeriod:        &leaderElectionRetryPeriod,
 		Namespace:          watchNamespace,
 		SyncPeriod:         &syncPeriod,
 		NewClient:          newClientFunc,
