@@ -233,7 +233,9 @@ func (o *objectMover) move(graph *objectGraph, toProxy Proxy) error {
 
 	// Create all objects group by group, ensuring all the ownerReferences are re-created.
 	log.Info("Creating objects in the target cluster")
+	log.Info("MYTU", "moveSequence length", len(moveSequence.groups))
 	for groupIndex := 0; groupIndex < len(moveSequence.groups); groupIndex++ {
+		log.Info("MYTU wth is this?", "node identity", moveSequence.getGroup(groupIndex))
 		if err := o.createGroup(moveSequence.getGroup(groupIndex), toProxy); err != nil {
 			return err
 		}
@@ -285,6 +287,7 @@ func (s *moveSequence) getGroup(i int) moveGroup {
 
 // Define the move sequence by processing the ownerReference chain.
 func getMoveSequence(graph *objectGraph) *moveSequence {
+	log := logf.Log
 	moveSequence := &moveSequence{
 		groups:   []moveGroup{},
 		nodesMap: make(map[*node]empty),
@@ -307,6 +310,7 @@ func getMoveSequence(graph *objectGraph) *moveSequence {
 			ownersInPlace := true
 			for owner := range n.owners {
 				if !moveSequence.hasNode(owner) {
+					log.Info("MYTU owner IS NOT IN place", "nodeName", n.identity.Name, "nodeApiVersion", n.identity.APIVersion)
 					ownersInPlace = false
 					break
 				}
@@ -318,6 +322,7 @@ func getMoveSequence(graph *objectGraph) *moveSequence {
 				}
 			}
 			if ownersInPlace {
+				log.Info("MYTU owners IN place", "nodeName", n.identity.Name, "nodeApiVersion", n.identity.APIVersion)
 				moveGroup = append(moveGroup, n)
 			}
 		}
