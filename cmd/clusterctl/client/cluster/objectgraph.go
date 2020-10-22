@@ -223,6 +223,7 @@ func (o *objectGraph) getForceMove(kind, apiVersion string, labels map[string]st
 // getDiscoveryTypes returns the list of TypeMeta to be considered for the the move discovery phase.
 // This list includes all the types defines by the CRDs installed by clusterctl and the ConfigMap/Secret core types.
 func (o *objectGraph) getDiscoveryTypes() error {
+	log := logf.Log
 	crdList := &apiextensionsv1.CustomResourceDefinitionList{}
 	getDiscoveryTypesBackoff := newReadBackoff()
 	if err := retryWithExponentialBackoff(getDiscoveryTypesBackoff, func() error {
@@ -251,6 +252,8 @@ func (o *objectGraph) getDiscoveryTypes() error {
 					Version: version.Name,
 				}.String(),
 			}
+
+			log.Info("MYTU discoveryTypeInfo", getKindAPIString(typeMeta))
 
 			o.types[getKindAPIString(typeMeta)] = &discoveryTypeInfo{
 				typeMeta:  typeMeta,
