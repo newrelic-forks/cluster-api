@@ -310,13 +310,14 @@ func getMoveSequence(graph *objectGraph) *moveSequence {
 			ownersInPlace := true
 			for owner := range n.owners {
 				if !moveSequence.hasNode(owner) {
-					log.Info("MYTU owner IS NOT IN place", "nodeName", n.identity.Name, "nodeApiVersion", n.identity.APIVersion)
+					log.Info("MYTU owner IS NOT IN place", "nodeName", owner.identity.Name, "kind", owner.identity.Kind, "nodeApiVersion", owner.identity.APIVersion)
 					ownersInPlace = false
 					break
 				}
 			}
 			for owner := range n.softOwners {
 				if !moveSequence.hasNode(owner) {
+					log.Info("MYTU softOwners IS NOT IN place", "nodeName", owner.identity.Name, "kind", owner.identity.Kind, "nodeApiVersion", owner.identity.APIVersion)
 					ownersInPlace = false
 					break
 				}

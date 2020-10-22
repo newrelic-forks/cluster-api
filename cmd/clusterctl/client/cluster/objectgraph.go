@@ -304,6 +304,8 @@ func (o *objectGraph) Discovery(namespace string) error {
 		typeMeta := discoveryType.typeMeta
 		objList := new(unstructured.UnstructuredList)
 
+		log.Info("MYTU getObjList", "APIVersion", typeMeta.APIVersion, "Kind", typeMeta.Kind)
+
 		if err := retryWithExponentialBackoff(discoveryBackoff, func() error {
 			return getObjList(o.proxy, typeMeta, selectors, objList)
 		}); err != nil {
