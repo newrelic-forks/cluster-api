@@ -59,6 +59,9 @@ spec:
                   to.
                 minLength: 1
                 type: string
+              externallyManagedReplicaCount:
+                description: Wether the Replicas value is externally managed.
+                type: boolean
               failureDomains:
                 description: FailureDomains is the list of failure domains this MachinePool
                   should be attached to.
@@ -383,6 +386,7 @@ spec:
                 type: object
             required:
             - clusterName
+            - externallyManagedReplicaCount
             - template
             type: object
           status:
