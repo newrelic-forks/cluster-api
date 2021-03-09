@@ -386,7 +386,6 @@ spec:
                 type: object
             required:
             - clusterName
-            - externallyManagedReplicaCount
             - template
             type: object
           status:

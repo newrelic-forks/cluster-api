@@ -64,7 +64,7 @@ type MachinePoolSpec struct {
 	FailureDomains []string `json:"failureDomains,omitempty"`
 
 	// Wether the Replicas value is externally managed.
-	ExternallyManagedReplicaCount bool `json:"externallyManagedReplicaCount"`
+	ExternallyManagedReplicaCount bool `json:"externallyManagedReplicaCount,omitempty"`
 }
 
 // ANCHOR_END: MachinePoolSpec
