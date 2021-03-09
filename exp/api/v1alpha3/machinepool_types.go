@@ -63,7 +63,7 @@ type MachinePoolSpec struct {
 	// FailureDomains is the list of failure domains this MachinePool should be attached to.
 	FailureDomains []string `json:"failureDomains,omitempty"`
 
-	// Wether the Replicas value is externally managed.
+	// Whether the Replicas value is externally managed.
 	ExternallyManagedReplicaCount bool `json:"externallyManagedReplicaCount,omitempty"`
 }
 
