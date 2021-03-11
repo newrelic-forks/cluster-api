@@ -53,7 +53,9 @@ func (r *MachinePoolReconciler) reconcileNodeRefs(ctx context.Context, cluster *
 	}
 
 	// Check that the Machine doesn't already have a NodeRefs.
-	if mp.Status.Replicas == mp.Status.ReadyReplicas && len(mp.Status.NodeRefs) == int(mp.Status.ReadyReplicas) {
+	if mp.Status.Replicas == mp.Status.ReadyReplicas &&
+		len(mp.Status.NodeRefs) == int(mp.Status.ReadyReplicas) &&
+		mp.Status.UnavailableReplicas == mp.Status.Replicas-mp.Status.AvailableReplicas {
 		conditions.MarkTrue(mp, expv1.ReplicasReadyCondition)
 		return ctrl.Result{}, nil
 	}
