@@ -64,6 +64,7 @@ type MachinePoolSpec struct {
 	FailureDomains []string `json:"failureDomains,omitempty"`
 
 	// Whether the Replicas value is externally managed.
+	// +kubebuilder:default=true
 	// +optional
 	ExternallyManagedReplicaCount bool `json:"externallyManagedReplicaCount"`
 }
