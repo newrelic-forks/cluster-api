@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"fmt"
+	"sigs.k8s.io/cluster-api/util/annotations"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,7 +52,7 @@ func (m *MachinePool) Default() {
 	}
 	m.Labels[clusterv1.ClusterLabelName] = m.Spec.ClusterName
 
-	if m.Spec.Replicas == nil {
+	if m.Spec.Replicas == nil && !annotations.IsExternallyManaged(m) {
 		m.Spec.Replicas = pointer.Int32Ptr(1)
 	}
 
