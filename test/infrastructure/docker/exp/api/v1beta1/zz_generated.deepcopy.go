@@ -23,6 +23,7 @@ package v1beta1
 
 import (
 	runtime "k8s.io/apimachinery/pkg/runtime"
+
 	cluster_apiapiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	apiv1beta1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1beta1"
 )
