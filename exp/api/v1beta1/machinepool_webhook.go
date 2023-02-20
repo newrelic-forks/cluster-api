@@ -29,6 +29,7 @@ import (
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/feature"
+	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/version"
 )
 
@@ -51,7 +52,7 @@ func (m *MachinePool) Default() {
 	}
 	m.Labels[clusterv1.ClusterLabelName] = m.Spec.ClusterName
 
-	if m.Spec.Replicas == nil {
+	if m.Spec.Replicas == nil && !annotations.IsExternallyManaged(m) {
 		m.Spec.Replicas = pointer.Int32Ptr(1)
 	}
 
