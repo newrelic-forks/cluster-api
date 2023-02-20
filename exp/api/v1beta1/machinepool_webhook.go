@@ -52,7 +52,7 @@ func (m *MachinePool) Default() {
 	}
 	m.Labels[clusterv1.ClusterLabelName] = m.Spec.ClusterName
 
-	if m.Spec.Replicas == nil && !annotations.IsExternallyManaged(m) {
+	if m.Spec.Replicas == nil && !annotations.IsExternallyManagedReplicas(m) {
 		m.Spec.Replicas = pointer.Int32Ptr(1)
 	}
 
