@@ -114,6 +114,12 @@ func (r *MachinePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	if mp.Spec.Replicas == nil {
+		err := errors.Errorf("machinepool %s doesn't have replicas set", mp.Name)
+		log.Error(err, "Failed to find replicas in a machinepool spec.", mp.Name)
+		return ctrl.Result{}, err
+	}
+
 	cluster, err := util.GetClusterByName(ctx, r.Client, mp.ObjectMeta.Namespace, mp.Spec.ClusterName)
 	if err != nil {
 		log.Error(err, "Failed to get Cluster %s for MachinePool.", mp.Spec.ClusterName)
