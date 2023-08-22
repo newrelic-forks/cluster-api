@@ -36,7 +36,7 @@ import (
 var (
 	v1beta1KubeadmVersion = semver.MustParse("1.13.0")
 	v1beta2KubeadmVersion = semver.MustParse("1.15.0")
-	v1beta3KubeadmVersion = semver.MustParse("1.22.0")
+	v1beta3KubeadmVersion = semver.MustParse("1.23.0")
 
 	clusterConfigurationVersionTypeMap = map[schema.GroupVersion]conversion.Convertible{
 		upstreamv1beta3.GroupVersion: &upstreamv1beta3.ClusterConfiguration{},
