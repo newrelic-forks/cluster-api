@@ -81,16 +81,18 @@ The generated binary can be found at ./hack/tools/bin/envsubst
 You'll need to deploy [cert-manager] components on your [management cluster][mcluster], using `kubectl`
 
 ```bash
+<<<<<<< HEAD
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
+=======
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.2/cert-manager.yaml
+>>>>>>> v1.5.7
 ```
 
 Ensure the cert-manager webhook service is ready before creating the Cluster API components.
 
-This can be done by running:
-
-```bash
-kubectl wait --for=condition=Available --timeout=300s apiservice v1beta1.webhook.cert-manager.io
-```
+This can be done by following instructions for [manual verification](https://cert-manager.io/docs/installation/verify/#manual-verification)
+from the [cert-manager] web site.
+Note: make sure to follow instructions for the release of cert-manager you are installing.
 
 [cert-manager]: https://github.com/cert-manager/cert-manager
 
@@ -107,35 +109,14 @@ Many of the Cluster API engineers use it for quick iteration. Please see our [Ti
 
 ## Option 2: The Old-fashioned way
 
-### Building everything
-
-You'll need to build two docker images, one for Cluster API itself and one for the Docker provider (CAPD).
-
 ```bash
+# Build all the images
 make docker-build
-make docker-capd-build
-```
 
-### Push both images
-
-```bash
+# Push images
 make docker-push
-```
-```bash
-docker push gcr.io/cluster-api-242700/cluster-api-controller-amd64:dev
-The push refers to repository [gcr.io/cluster-api-242700/cluster-api-controller-amd64]
-90a39583ad5f: Layer already exists
-932da5156413: Layer already exists
-dev: digest: sha256:263262cfbabd3d1add68172a5a1d141f6481a2bc443672ce80778dc122ee6234 size: 739
-```
-```bash
-$ make docker-capd-push
-```
-```bash
-docker push gcr.io/cluster-api-242700/capd-manager-amd64:dev
-The push refers to repository [gcr.io/cluster-api-242700/capd-manager-amd64]
-```
 
+<<<<<<< HEAD
 Make a note of the URLs and the digests. You'll need them for the next step. In this case, they're...
 
 `gcr.io/cluster-api-242700/capd-manager-amd64@sha256:35670a049372ae063dad910c267a4450758a139c4deb248c04c3198865589ab2`
@@ -214,6 +195,13 @@ capd-controller-manager-7568c55d65-ndpts   2/2     Running   0          71s
 kubectl get po -n capi-system
 NAME                                      READY   STATUS    RESTARTS   AGE
 capi-controller-manager-bf9c6468c-d6msj   1/1     Running   0          2m9s
+=======
+# Apply the manifests
+kustomize build config/default | ./hack/tools/bin/envsubst | kubectl apply -f -
+kustomize build bootstrap/kubeadm/config/default | ./hack/tools/bin/envsubst | kubectl apply -f -
+kustomize build controlplane/kubeadm/config/default | ./hack/tools/bin/envsubst | kubectl apply -f -
+kustomize build test/infrastructure/docker/config/default | ./hack/tools/bin/envsubst | kubectl apply -f -
+>>>>>>> v1.5.7
 ```
 
 ## Testing
@@ -228,12 +216,13 @@ information on each suite.
 Now you can [create CAPI objects][qs]!
 To test another iteration, you'll need to follow the steps to build, push, update the manifests, and apply.
 
-[qs]: ../user/quick-start.md#usage
+[qs]: ../user/quick-start.md
 
 ## Videos explaining CAPI architecture and code walkthroughs
 
 **CAPI components and architecture**
 
+* [Simplified Experience Of Building Cluster API Provider In Multitenant Cloud - October 2022](https://www.youtube.com/watch?v=1oj9BuV2dzA)
 * [Cluster API Intro and Deep Dive - May 2022 v1beta1](https://www.youtube.com/watch?v=9H8flXm_lKk)
 * [Cluster API Deep Dive - Dec 2020 v1alpha3](https://youtu.be/npFO5Fixqcc)
 * [Cluster API Deep Dive - Sept 2020 v1alpha3](https://youtu.be/9SfuQQeeK6Q)
@@ -242,8 +231,21 @@ To test another iteration, you'll need to follow the steps to build, push, updat
 
 **Additional ClusterAPI KubeCon talks**
 
+* [How Adobe Planned For Scale With Argo CD, Cluster API, And VCluster - October 2022](https://www.youtube.com/watch?v=p8BluR5WT5w)
+* [Bare-Metal Chronicles: Intertwinement Of Tinkerbell, Cluster API And GitOps - October 2022](https://www.youtube.com/watch?v=NCFUUjTw6hA)
+* [Running Isolated VirtualClusters With Kata & Cluster API - October 2022](https://www.youtube.com/watch?v=T6w3YrExorY)
+* [SIG Cluster Lifecycle Intro - October 2022](https://www.youtube.com/watch?v=0Zo0cWYU0fM)
 * [How to Migrate 700 Kubernetes Clusters to Cluster API with Zero Downtime - May 2022](https://www.youtube.com/watch?v=KzYV-fJ_wH0)
 * [Build Your Own Cluster API Provider the Easy Way - May 2022](https://www.youtube.com/watch?v=HSdgmcAAXa8)
+
+**Tutorials**
+
+* [kubectl Create Cluster: Production-ready Kubernetes with Cluster API 1.0 - October 2022](https://kccncna2022.sched.com/event/1BZDs)
+
+  [Source code](https://github.com/ykakarap/kubecon-na-22-capi-lab)
+* [So You Want To Develop a Cluster API Provider? - October 2022](https://kccncna2022.sched.com/event/182Ha)
+
+  [Source code](https://capi-samples.github.io/kubecon-na-2022-tutorial/)
 
 **Code walkthroughs**
 
@@ -252,8 +254,8 @@ To test another iteration, you'll need to follow the steps to build, push, updat
 
 **Let's chat about ...**
 
-We are currently hosting "Let's chat about ..." sessions where we are talking about topics relevant to 
-contributors and users of the Cluster API project. For more details and an up-to-date list of recordings of past sessions please 
+We are currently hosting "Let's chat about ..." sessions where we are talking about topics relevant to
+contributors and users of the Cluster API project. For more details and an up-to-date list of recordings of past sessions please
 see [Let's chat about ...](https://github.com/kubernetes-sigs/cluster-api/discussions/6106).
 
 * [Local CAPI development and debugging with Tilt (EMEA/Americas) - February 2022](https://www.youtube.com/watch?v=tEIRGmJahWs)

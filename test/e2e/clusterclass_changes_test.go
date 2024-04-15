@@ -20,23 +20,34 @@ limitations under the License.
 package e2e
 
 import (
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
+	"k8s.io/utils/pointer"
 )
 
 var _ = Describe("When testing ClusterClass changes [ClusterClass]", func() {
 	ClusterClassChangesSpec(ctx, func() ClusterClassChangesSpecInput {
 		return ClusterClassChangesSpecInput{
+<<<<<<< HEAD
 			E2EConfig:             e2eConfig,
 			ClusterctlConfigPath:  clusterctlConfigPath,
 			BootstrapClusterProxy: bootstrapClusterProxy,
 			ArtifactFolder:        artifactFolder,
 			SkipCleanup:           skipCleanup,
 			Flavor:                "topology-changes",
+=======
+			E2EConfig:              e2eConfig,
+			ClusterctlConfigPath:   clusterctlConfigPath,
+			BootstrapClusterProxy:  bootstrapClusterProxy,
+			ArtifactFolder:         artifactFolder,
+			SkipCleanup:            skipCleanup,
+			InfrastructureProvider: pointer.String("docker"),
+			Flavor:                 "topology",
+>>>>>>> v1.5.7
 			// ModifyControlPlaneFields are the ControlPlane fields which will be set on the
 			// ControlPlaneTemplate of the ClusterClass after the initial Cluster creation.
 			// The test verifies that these fields are rolled out to the ControlPlane.
 			ModifyControlPlaneFields: map[string]interface{}{
-				"spec.machineTemplate.nodeDrainTimeout": "10s",
+				"spec.kubeadmConfigSpec.verbosity": int64(4),
 			},
 			// ModifyMachineDeploymentBootstrapConfigTemplateFields are the fields which will be set on the
 			// BootstrapConfigTemplate of all MachineDeploymentClasses of the ClusterClass after the initial Cluster creation.
@@ -54,7 +65,13 @@ var _ = Describe("When testing ClusterClass changes [ClusterClass]", func() {
 						"hostPath":      "/var/run/docker.sock",
 					},
 					map[string]interface{}{
+<<<<<<< HEAD
 						"containerPath": "/tmp",
+=======
+						// /tmp cannot be used as containerPath as
+						// it already exists.
+						"containerPath": "/test",
+>>>>>>> v1.5.7
 						"hostPath":      "/tmp",
 					},
 				},

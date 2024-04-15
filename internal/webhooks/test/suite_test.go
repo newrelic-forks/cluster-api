@@ -24,9 +24,12 @@ import (
 
 	"k8s.io/component-base/featuregate"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	"sigs.k8s.io/cluster-api/api/v1beta1/index"
 	"sigs.k8s.io/cluster-api/feature"
+	"sigs.k8s.io/cluster-api/internal/controllers/clusterclass"
 	"sigs.k8s.io/cluster-api/internal/test/envtest"
 )
 
@@ -44,10 +47,29 @@ func TestMain(m *testing.M) {
 			panic(fmt.Sprintf("unable to setup index: %v", err))
 		}
 	}
+	setupReconcilers := func(ctx context.Context, mgr ctrl.Manager) {
+		unstructuredCachingClient, err := client.New(mgr.GetConfig(), client.Options{
+			Cache: &client.CacheOptions{
+				Reader:       mgr.GetCache(),
+				Unstructured: true,
+			},
+		})
+		if err != nil {
+			panic(fmt.Sprintf("unable to create unstructuredCachineClient: %v", err))
+		}
+		if err := (&clusterclass.Reconciler{
+			Client:                    mgr.GetClient(),
+			APIReader:                 mgr.GetAPIReader(),
+			UnstructuredCachingClient: unstructuredCachingClient,
+		}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 5}); err != nil {
+			panic(fmt.Sprintf("unable to create clusterclass reconciler: %v", err))
+		}
+	}
 
 	os.Exit(envtest.Run(ctx, envtest.RunInput{
-		M:            m,
-		SetupEnv:     func(e *envtest.Environment) { env = e },
-		SetupIndexes: setupIndexes,
+		M:                m,
+		SetupEnv:         func(e *envtest.Environment) { env = e },
+		SetupReconcilers: setupReconcilers,
+		SetupIndexes:     setupIndexes,
 	}))
 }

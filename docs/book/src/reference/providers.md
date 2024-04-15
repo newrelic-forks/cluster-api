@@ -6,19 +6,44 @@ are also sponsored by SIG Cluster Lifecycle. Check provider's documentation for
 updated info about which API version they are supporting.
 
 ## Bootstrap
+<<<<<<< HEAD
 - [EKS](https://github.com/kubernetes-sigs/cluster-api-provider-aws/tree/main/bootstrap/eks)
+=======
+- [Amazon Elastic Kubernetes Service (EKS)](https://github.com/kubernetes-sigs/cluster-api-provider-aws/tree/main/bootstrap/eks)
+>>>>>>> v1.5.7
 - [Kubeadm](https://github.com/kubernetes-sigs/cluster-api/tree/main/bootstrap/kubeadm)
+- [MicroK8s](https://github.com/canonical/cluster-api-bootstrap-provider-microk8s)
+- [Oracle Cloud Native Environment (OCNE)](https://github.com/verrazzano/cluster-api-provider-ocne)
 - [Talos](https://github.com/siderolabs/cluster-api-bootstrap-provider-talos)
+<<<<<<< HEAD
+=======
+
+## Control Plane
+- [Kubeadm](https://github.com/kubernetes-sigs/cluster-api/tree/main/controlplane/kubeadm)
+- [MicroK8s](https://github.com/canonical/cluster-api-control-plane-provider-microk8s)
+- [Nested](https://github.com/kubernetes-sigs/cluster-api-provider-nested)
+- [Oracle Cloud Native Environment (OCNE)](https://github.com/verrazzano/cluster-api-provider-ocne)
+- [Talos](https://github.com/siderolabs/cluster-api-control-plane-provider-talos)
+>>>>>>> v1.5.7
 
 ## Infrastructure
 - [AWS](https://cluster-api-aws.sigs.k8s.io/)
 - [Azure](https://github.com/kubernetes-sigs/cluster-api-provider-azure)
 - [Azure Stack HCI](https://github.com/microsoft/cluster-api-provider-azurestackhci)
+<<<<<<< HEAD
 - [BYOH](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost)
 - [CloudStack](https://github.com/kubernetes-sigs/cluster-api-provider-cloudstack)
 - [DigitalOcean](https://github.com/kubernetes-sigs/cluster-api-provider-digitalocean)
 - [Equinix Metal (formerly Packet)](https://github.com/kubernetes-sigs/cluster-api-provider-packet)
 - [GCP](https://github.com/kubernetes-sigs/cluster-api-provider-gcp)
+=======
+- [Bring Your Own Host (BYOH)](https://github.com/vmware-tanzu/cluster-api-provider-bringyourownhost)
+- [CloudStack](https://github.com/kubernetes-sigs/cluster-api-provider-cloudstack)
+- [CoxEdge](https://github.com/coxedge/cluster-api-provider-coxedge)
+- [DigitalOcean](https://github.com/kubernetes-sigs/cluster-api-provider-digitalocean)
+- [Equinix Metal (formerly Packet)](https://github.com/kubernetes-sigs/cluster-api-provider-packet)
+- [Google Cloud Platform (GCP)](https://github.com/kubernetes-sigs/cluster-api-provider-gcp)
+>>>>>>> v1.5.7
 - [Hetzner](https://github.com/syself/cluster-api-provider-hetzner)
 - [Outscale](https://github.com/outscale-dev/cluster-api-provider-outscale)
 - [IBM Cloud](https://github.com/kubernetes-sigs/cluster-api-provider-ibmcloud)
@@ -29,14 +54,29 @@ updated info about which API version they are supporting.
 - [Microvm](https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm)
 - [Nested](https://github.com/kubernetes-sigs/cluster-api-provider-nested)
 - [Nutanix](https://github.com/nutanix-cloud-native/cluster-api-provider-nutanix)
-- [OCI](https://github.com/oracle/cluster-api-provider-oci)
+- [Oracle Cloud Infrastructure (OCI)](https://github.com/oracle/cluster-api-provider-oci)
 - [OpenStack](https://github.com/kubernetes-sigs/cluster-api-provider-openstack)
+<<<<<<< HEAD
 - [Sidero](https://github.com/siderolabs/sidero)
 - [Tencent Cloud](https://github.com/TencentCloud/cluster-api-provider-tencent)
+=======
+- [Outscale](https://github.com/outscale/cluster-api-provider-outscale)
+- [Sidero](https://github.com/siderolabs/sidero)
+- [Tinkerbell](https://github.com/tinkerbell/cluster-api-provider-tinkerbell)
+>>>>>>> v1.5.7
 - [vcluster](https://github.com/loft-sh/cluster-api-provider-vcluster)
 - [Virtink](https://github.com/smartxworks/cluster-api-provider-virtink)
 - [VMware Cloud Director](https://github.com/vmware/cluster-api-provider-cloud-director)  
 - [vSphere](https://github.com/kubernetes-sigs/cluster-api-provider-vsphere)
+<<<<<<< HEAD
+=======
+
+## IP Address Management (IPAM)
+- [In Cluster](https://github.com/kubernetes-sigs/cluster-api-ipam-provider-in-cluster)
+
+## Addon
+- [Helm](https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/)
+>>>>>>> v1.5.7
 
 ## API Adopters
 

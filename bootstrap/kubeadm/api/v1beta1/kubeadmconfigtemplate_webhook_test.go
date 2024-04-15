@@ -36,7 +36,7 @@ func TestKubeadmConfigTemplateDefault(t *testing.T) {
 		},
 	}
 	updateDefaultingKubeadmConfigTemplate := kubeadmConfigTemplate.DeepCopy()
-	updateDefaultingKubeadmConfigTemplate.Spec.Template.Spec.Verbosity = pointer.Int32Ptr(4)
+	updateDefaultingKubeadmConfigTemplate.Spec.Template.Spec.Verbosity = pointer.Int32(4)
 	t.Run("for KubeadmConfigTemplate", utildefaulting.DefaultValidateTest(updateDefaultingKubeadmConfigTemplate))
 
 	kubeadmConfigTemplate.Default()
@@ -68,8 +68,12 @@ func TestKubeadmConfigTemplateValidation(t *testing.T) {
 
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
-			g.Expect(tt.in.ValidateCreate()).To(Succeed())
-			g.Expect(tt.in.ValidateUpdate(nil)).To(Succeed())
+			warnings, err := tt.in.ValidateCreate()
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
+			warnings, err = tt.in.ValidateUpdate(nil)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
 		})
 	}
 }

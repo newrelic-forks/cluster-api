@@ -17,8 +17,11 @@ limitations under the License.
 package client
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/cluster"
@@ -30,20 +33,26 @@ type DeleteOptions struct {
 	// default rules for kubeconfig discovery will be used.
 	Kubeconfig Kubeconfig
 
-	// CoreProvider version (e.g. cluster-api:v0.3.0) to add to the management cluster. If unspecified, the
-	// cluster-api core provider's latest release is used.
+	// CoreProvider version (e.g. cluster-api:v1.1.5) to delete from the management cluster.
 	CoreProvider string
 
-	// BootstrapProviders and versions (e.g. kubeadm:v0.3.0) to add to the management cluster.
-	// If unspecified, the kubeadm bootstrap provider's latest release is used.
+	// BootstrapProviders and versions (e.g. kubeadm:v1.1.5) to delete from the management cluster.
 	BootstrapProviders []string
 
-	// InfrastructureProviders and versions (e.g. aws:v0.5.0) to add to the management cluster.
+	// InfrastructureProviders and versions (e.g. aws:v0.5.0) to delete from the management cluster.
 	InfrastructureProviders []string
 
-	// ControlPlaneProviders and versions (e.g. kubeadm:v0.3.0) to add to the management cluster.
-	// If unspecified, the kubeadm control plane provider latest release is used.
+	// ControlPlaneProviders and versions (e.g. kubeadm:v1.1.5) to delete from the management cluster.
 	ControlPlaneProviders []string
+
+	// IPAMProviders and versions (e.g. infoblox:v0.0.1) to delete from the management cluster.
+	IPAMProviders []string
+
+	// RuntimeExtensionProviders and versions (e.g. test:v0.0.1) to delete from the management cluster.
+	RuntimeExtensionProviders []string
+
+	// AddonProviders and versions (e.g. helm:v0.1.0) to delete from the management cluster.
+	AddonProviders []string
 
 	// DeleteAll set for deletion of all the providers.
 	DeleteAll bool
@@ -109,6 +118,21 @@ func (c *clusterctlClient) Delete(options DeleteOptions) error {
 			return err
 		}
 
+		providers, err = appendProviders(providers, clusterctlv1.IPAMProviderType, options.IPAMProviders...)
+		if err != nil {
+			return err
+		}
+
+		providers, err = appendProviders(providers, clusterctlv1.RuntimeExtensionProviderType, options.RuntimeExtensionProviders...)
+		if err != nil {
+			return err
+		}
+
+		providers, err = appendProviders(providers, clusterctlv1.AddonProviderType, options.AddonProviders...)
+		if err != nil {
+			return err
+		}
+
 		for _, provider := range providers {
 			// Try to detect the namespace where the provider lives
 			provider.Namespace, err = clusterClient.ProviderInventory().GetProviderNamespace(provider.ProviderName, provider.GetProviderType())
@@ -130,6 +154,19 @@ func (c *clusterctlClient) Delete(options DeleteOptions) error {
 			}
 
 			providersToDelete = append(providersToDelete, provider)
+		}
+	}
+
+	if options.IncludeCRDs {
+		errList := []error{}
+		for _, provider := range providersToDelete {
+			err = clusterClient.ProviderComponents().ValidateNoObjectsExist(context.TODO(), provider)
+			if err != nil {
+				errList = append(errList, err)
+			}
+		}
+		if len(errList) > 0 {
+			return kerrors.NewAggregate(errList)
 		}
 	}
 

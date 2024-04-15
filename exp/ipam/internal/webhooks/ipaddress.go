@@ -19,10 +19,17 @@ package webhooks
 import (
 	"context"
 	"fmt"
+<<<<<<< HEAD
 	"reflect"
 
 	"github.com/pkg/errors"
 	"inet.af/netaddr"
+=======
+	"net/netip"
+	"reflect"
+
+	"github.com/pkg/errors"
+>>>>>>> v1.5.7
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,6 +37,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+<<<<<<< HEAD
+=======
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+>>>>>>> v1.5.7
 
 	ipamv1 "sigs.k8s.io/cluster-api/exp/ipam/api/v1alpha1"
 )
@@ -53,6 +64,7 @@ type IPAddress struct {
 var _ webhook.CustomValidator = &IPAddress{}
 
 // ValidateCreate implements webhook.CustomValidator.
+<<<<<<< HEAD
 func (webhook *IPAddress) ValidateCreate(ctx context.Context, obj runtime.Object) error {
 	ip, ok := obj.(*ipamv1.IPAddress)
 	if !ok {
@@ -81,6 +93,36 @@ func (webhook *IPAddress) ValidateUpdate(ctx context.Context, oldObj, newObj run
 // ValidateDelete implements webhook.CustomValidator.
 func (webhook *IPAddress) ValidateDelete(ctx context.Context, obj runtime.Object) error {
 	return nil
+=======
+func (webhook *IPAddress) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	ip, ok := obj.(*ipamv1.IPAddress)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddress but got a %T", obj))
+	}
+	return nil, webhook.validate(ctx, ip)
+}
+
+// ValidateUpdate implements webhook.CustomValidator.
+func (webhook *IPAddress) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	oldIP, ok := oldObj.(*ipamv1.IPAddress)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddress but got a %T", oldObj))
+	}
+	newIP, ok := newObj.(*ipamv1.IPAddress)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddress but got a %T", newObj))
+	}
+
+	if !reflect.DeepEqual(oldIP.Spec, newIP.Spec) {
+		return nil, field.Forbidden(field.NewPath("spec"), "the spec of IPAddress is immutable")
+	}
+	return nil, nil
+}
+
+// ValidateDelete implements webhook.CustomValidator.
+func (webhook *IPAddress) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return nil, nil
+>>>>>>> v1.5.7
 }
 
 func (webhook *IPAddress) validate(ctx context.Context, ip *ipamv1.IPAddress) error {
@@ -88,7 +130,11 @@ func (webhook *IPAddress) validate(ctx context.Context, ip *ipamv1.IPAddress) er
 	allErrs := field.ErrorList{}
 	specPath := field.NewPath("spec")
 
+<<<<<<< HEAD
 	addr, err := netaddr.ParseIP(ip.Spec.Address)
+=======
+	addr, err := netip.ParseAddr(ip.Spec.Address)
+>>>>>>> v1.5.7
 	if err != nil {
 		allErrs = append(allErrs,
 			field.Invalid(
@@ -123,6 +169,7 @@ func (webhook *IPAddress) validate(ctx context.Context, ip *ipamv1.IPAddress) er
 			))
 	}
 
+<<<<<<< HEAD
 	_, err = netaddr.ParseIP(ip.Spec.Gateway)
 	if err != nil {
 		allErrs = append(allErrs,
@@ -131,6 +178,17 @@ func (webhook *IPAddress) validate(ctx context.Context, ip *ipamv1.IPAddress) er
 				ip.Spec.Gateway,
 				"not a valid IP address",
 			))
+=======
+	if ip.Spec.Gateway != "" {
+		if _, err := netip.ParseAddr(ip.Spec.Gateway); err != nil {
+			allErrs = append(allErrs,
+				field.Invalid(
+					specPath.Child("gateway"),
+					ip.Spec.Gateway,
+					"not a valid IP address",
+				))
+		}
+>>>>>>> v1.5.7
 	}
 
 	if ip.Spec.PoolRef.APIGroup == nil {

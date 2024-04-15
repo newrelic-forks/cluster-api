@@ -49,6 +49,14 @@ A GitHub release can be used as a provider repository if:
 See the [GitHub docs](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository) for more information
 about how to create a release.
 
+Per default `clusterctl` will use a go proxy to detect the available versions to prevent additional
+API calls to the GitHub API. It is possible to configure the go proxy url using the `GOPROXY` variable as
+for go itself (defaults to `https://proxy.golang.org`).
+To immediately fallback to the GitHub client and not use a go proxy, the environment variable could get set to
+`GOPROXY=off` or `GOPROXY=direct`.
+If a provider does not follow Go's semantic versioning, `clusterctl` may fail when detecting the correct version.
+In such cases, disabling the go proxy functionality via `GOPROXY=off` should be considered.
+
 #### Creating a provider repository on GitLab
 
 You can use a GitLab generic packages for provider artifacts.
@@ -160,6 +168,9 @@ It is strongly recommended that:
 * Infrastructure providers release a file called `infrastructure-components.yaml`
 * Bootstrap providers release a file called ` bootstrap-components.yaml`
 * Control plane providers release a file called `control-plane-components.yaml`
+* IPAM providers release a file called `ipam-components.yaml`
+* Runtime extensions providers release a file called `runtime-extension-components.yaml`
+* Add-on providers release a file called `addon-components.yaml`
 
 #### Target namespace
 
@@ -183,14 +194,16 @@ the provider installation.
 
 #### Controllers & Watching namespace
 
-Each provider is expected to deploy controllers using a Deployment.
+Each provider is expected to deploy controllers/runtime extension server using a Deployment.
 
-While defining the Deployment Spec, the container that executes the controller binary MUST be called `manager`.
+While defining the Deployment Spec, the container that executes the controller/runtime extension server binary MUST be called `manager`.
 
-The manager MUST support a `--namespace` flag for specifying the namespace where the controller
+For controllers only, the manager MUST support a `--namespace` flag for specifying the namespace where the controller
 will look for objects to reconcile; however, clusterctl will always install providers watching for all namespaces
 (`--namespace=""`); for more details see [support for multiple instances](../developer/architecture/controllers/support-multiple-instances.md)
 for more context.
+
+While defining Pods for Deployments, canonical names should be used for images.
 
 #### Variables
 
@@ -236,14 +249,29 @@ providers.
 |---------------|-------------------------------------------------------|
 | CAPI          | cluster.x-k8s.io/provider=cluster-api                 |
 | CABPK         | cluster.x-k8s.io/provider=bootstrap-kubeadm           |
+<<<<<<< HEAD
 | CABPKK3S      | cluster.x-k8s.io/provider=bootstrap-kubekey-k3s       |
 | CACPK         | cluster.x-k8s.io/provider=control-plane-kubeadm       |
 | CACPKK3S      | cluster.x-k8s.io/provider=control-plane-kubekey-k3s   |
 | CACPN         | cluster.x-k8s.io/provider=control-plane-nested        |
+=======
+| CABPM         | cluster.x-k8s.io/provider=bootstrap-microk8s          |
+| CABPKK3S      | cluster.x-k8s.io/provider=bootstrap-kubekey-k3s       |
+| CABPOCNE      | cluster.x-k8s.io/provider=bootstrap-ocne              |
+| CACPK         | cluster.x-k8s.io/provider=control-plane-kubeadm       |
+| CACPM         | cluster.x-k8s.io/provider=control-plane-microk8s      |
+| CACPN         | cluster.x-k8s.io/provider=control-plane-nested        |
+| CACPKK3S      | cluster.x-k8s.io/provider=control-plane-kubekey-k3s   |
+| CACPOCNE      | cluster.x-k8s.io/provider=control-plane-ocne          |
+>>>>>>> v1.5.7
 | CAPA          | cluster.x-k8s.io/provider=infrastructure-aws          |
 | CAPB          | cluster.x-k8s.io/provider=infrastructure-byoh         |
 | CAPC          | cluster.x-k8s.io/provider=infrastructure-cloudstack   |
 | CAPD          | cluster.x-k8s.io/provider=infrastructure-docker       |
+<<<<<<< HEAD
+=======
+| CAPIM         | cluster.x-k8s.io/provider=infrastructure-in-memory    |
+>>>>>>> v1.5.7
 | CAPDO         | cluster.x-k8s.io/provider=infrastructure-digitalocean |
 | CAPG          | cluster.x-k8s.io/provider=infrastructure-gcp          |
 | CAPH          | cluster.x-k8s.io/provider=infrastructure-hetzner      |
@@ -261,6 +289,10 @@ providers.
 | CAPX          | cluster.x-k8s.io/provider=infrastructure-nutanix      |
 | CAPZ          | cluster.x-k8s.io/provider=infrastructure-azure        |
 | CAPOSC        | cluster.x-k8s.io/provider=infrastructure-outscale     |
+<<<<<<< HEAD
+=======
+
+>>>>>>> v1.5.7
 ### Workload cluster templates
 
 An infrastructure provider could publish a **cluster templates** file to be used by `clusterctl generate cluster`.
@@ -422,7 +454,7 @@ that are compliant with one of the following rules:
   * The object is directly or indirectly linked to a `ClusterResourceSet` object (through the `OwnerReference` chain).
   * The object is directly or indirectly linked to another object with the `clusterctl.cluster.x-k8s.io/move-hierarchy`
     label, e.g. the infrastructure Provider ClusterIdentity objects (linked through the `OwnerReference` chain).
-  * The object hase the `clusterctl.cluster.x-k8s.io/move` label or the `clusterctl.cluster.x-k8s.io/move-hierarchy` label,
+  * The object has the `clusterctl.cluster.x-k8s.io/move` label or the `clusterctl.cluster.x-k8s.io/move-hierarchy` label,
     e.g. the CPI config secret.
 
 Note. `clusterctl.cluster.x-k8s.io/move` and `clusterctl.cluster.x-k8s.io/move-hierarchy` labels could be applied
@@ -451,6 +483,19 @@ exact move sequence to be executed by the user.
 
 Additionally, provider authors should be aware that `clusterctl move` assumes all the provider's Controllers respect the
 `Cluster.Spec.Paused` field introduced in the v1alpha3 Cluster API specification.
+
+<aside class="note warning">
+
+<h1> Warning: Status subresource is never restored </h1>
+
+Every object's `Status` subresource, including every nested field (e.g. `Status.Conditions`), is never 
+restored during a `move` operation. A `Status` subresource should never contain fields that cannot 
+be recreated or derived from information in spec, metadata, or external systems.
+
+Provider implementers should not store non-ephemeral data in the `Status`. 
+`Status` should be able to be fully rebuilt by controllers by observing the current state of resources.
+
+</aside>
 
 <!--LINKS-->
 [drone-envsubst]: https://github.com/drone/envsubst

@@ -36,7 +36,12 @@ type IPAddressSpec struct {
 	Prefix int `json:"prefix"`
 
 	// Gateway is the network gateway of the network the address is from.
+<<<<<<< HEAD
 	Gateway string `json:"gateway"`
+=======
+	// +optional
+	Gateway string `json:"gateway,omitempty"`
+>>>>>>> v1.5.7
 }
 
 // +kubebuilder:object:root=true

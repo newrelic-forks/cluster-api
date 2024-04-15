@@ -21,6 +21,13 @@ ARG builder_image
 # Build architecture
 ARG ARCH
 
+<<<<<<< HEAD
+=======
+# Ignore Hadolint rule "Always tag the version of an image explicitly."
+# It's an invalid finding since the image is explicitly set in the Makefile.
+# https://github.com/hadolint/hadolint/wiki/DL3006
+# hadolint ignore=DL3006
+>>>>>>> v1.5.7
 FROM ${builder_image} as builder
 WORKDIR /workspace
 
@@ -41,7 +48,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Copy the sources
 COPY ./ ./
 
-# Cache the go build into the the Go’s compiler cache folder so we take benefits of compiler caching across docker build calls
+# Cache the go build into the Go’s compiler cache folder so we take benefits of compiler caching across docker build calls
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build .

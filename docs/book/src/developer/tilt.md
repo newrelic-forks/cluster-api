@@ -8,8 +8,8 @@ workflow that offers easy deployments and rapid iterative builds.
 ## Prerequisites
 
 1. [Docker](https://docs.docker.com/install/): v19.03 or newer
-1. [kind](https://kind.sigs.k8s.io): v0.9 or newer
-1. [Tilt](https://docs.tilt.dev/install.html): v0.22.2 or newer
+1. [kind](https://kind.sigs.k8s.io): v0.20.0 or newer
+1. [Tilt](https://docs.tilt.dev/install.html): v0.30.8 or newer
 1. [kustomize](https://github.com/kubernetes-sigs/kustomize): provided via `make kustomize`
 1. [envsubst](https://github.com/drone/envsubst): provided via `make envsubst`
 1. [helm](https://github.com/helm/helm): v3.7.1 or newer
@@ -20,7 +20,7 @@ workflow that offers easy deployments and rapid iterative builds.
 ## Getting started
 
 ### Create a kind cluster
-A script to create a KIND cluster along with a local docker registry and the correct mounts to run CAPD is included in the hack/ folder.
+A script to create a KIND cluster along with a local Docker registry and the correct mounts to run CAPD is included in the hack/ folder.
 
 To create a pre-configured cluster run:
 
@@ -36,7 +36,17 @@ kubectl cluster-info --context kind-capi-test
 
 ### Create a tilt-settings file
 
-Next, create a `tilt-settings.yaml` file and place it in your local copy of `cluster-api`. Here is an example:
+Next, create a `tilt-settings.yaml` file and place it in your local copy of `cluster-api`. Here is an example that uses the components from the CAPI repo:
+
+```yaml
+default_registry: gcr.io/your-project-name-here
+enable_providers:
+- docker
+- kubeadm-bootstrap
+- kubeadm-control-plane
+```
+
+To use tilt to launch a provider with its own repo, using Cluster API Provider AWS here, `tilt-settings.yaml` should look like: 
 
 ```yaml
 default_registry: gcr.io/your-project-name-here
@@ -44,7 +54,6 @@ provider_repos:
 - ../cluster-api-provider-aws
 enable_providers:
 - aws
-- docker
 - kubeadm-bootstrap
 - kubeadm-control-plane
 ```
@@ -60,8 +69,13 @@ If you prefer JSON, you can create a `tilt-settings.json` file instead. YAML wil
 **allowed_contexts** (Array, default=[]): A list of kubeconfig contexts Tilt is allowed to use. See the Tilt documentation on
 [allow_k8s_contexts](https://docs.tilt.dev/api.html#api.allow_k8s_contexts) for more details.
 
-**default_registry** (String, default=""): The image registry to use if you need to push images. See the [Tilt
+**default_registry** (String, default=[]): The image registry to use if you need to push images. See the [Tilt
 documentation](https://docs.tilt.dev/api.html#api.default_registry) for more details.
+Please note that, in case you are not using a local registry, this value is required; additionally, the Cluster API
+Tiltfile protects you from accidental push on `gcr.io/k8s-staging-cluster-api`.
+
+**build_engine** (String, default="docker"): The engine used to build images. Can either be `docker` or `podman`.
+NB: the default is dynamic and will be "podman" if the string "Podman Engine" is found in `docker version` (or in `podman version` if the command fails).
 
 **kind_cluster_name** (String, default="capi-test"): The name of the kind cluster to use when preloading images.
 
@@ -71,8 +85,26 @@ documentation](https://docs.tilt.dev/api.html#api.default_registry) for more det
 **enable_providers** (Array[]String, default=['docker']): A list of the providers to enable. See [available providers](#available-providers)
 for more details.
 
+**template_dirs** (Map{String: Array[]String}, default={"docker": [
+"./test/infrastructure/docker/templates"]}): A map of providers to directories containing cluster templates. An example of the field is given below. See [Deploying a workload cluster](#deploying-a-workload-cluster) for how this is used.
+
+```yaml
+template_dirs:
+  docker:
+  - ./test/infrastructure/docker/templates
+  - <other-template-dir>
+  azure:
+  - <azure-template-dir>
+  aws:
+  - <aws-template-dir>
+  gcp:
+  - <gcp-template-dir>
+```
+
 **kustomize_substitutions** (Map{String: String}, default={}): An optional map of substitutions for `${}`-style placeholders in the
-provider's yaml. **Note**: When running E2E tests locally using an existing cluster managed by Tilt, the following substitutions are required for successful tests:
+provider's yaml. These substitutions are also used when deploying cluster templates. See [Deploying a workload cluster](#deploying-a-workload-cluster).
+
+**Note**: When running E2E tests locally using an existing cluster managed by Tilt, the following substitutions are required for successful tests:
 ```yaml
 kustomize_substitutions:
   CLUSTER_TOPOLOGY: "true"
@@ -80,9 +112,10 @@ kustomize_substitutions:
   EXP_CLUSTER_RESOURCE_SET: "true"
   EXP_KUBEADM_BOOTSTRAP_FORMAT_IGNITION: "true"
   EXP_RUNTIME_SDK: "true"
+  EXP_MACHINE_SET_PREFLIGHT_CHECKS: "true"
 ```
 
-{{#tabs name:"tab-tilt-kustomize-substitution" tabs:"AWS,Azure,DigitalOcean,GCP"}}
+{{#tabs name:"tab-tilt-kustomize-substitution" tabs:"AWS,Azure,DigitalOcean,GCP,vSphere"}}
 {{#tab AWS}}
 
 For example, if the yaml contains `${AWS_B64ENCODED_CREDENTIALS}`, you could do the following:
@@ -152,11 +185,34 @@ kustomize_substitutions:
 ```
 
 {{#/tab }}
+{{#tab vSphere}}
+
+```yaml
+kustomize_substitutions:
+  VSPHERE_USERNAME: "administrator@vsphere.local"
+  VSPHERE_PASSWORD: "Admin123"
+```
+
+{{#/tab }}
 {{#/tabs }}
 
 **deploy_observability** ([string], default=[]): If set, installs on the dev cluster one of more observability
-tools. Supported values are `grafana`, `loki`, `promtail` and/or `prometheus` (Note: the UI for `grafana` and `prometheus` will be accessible via a link in the tilt console).
+tools.
 Important! This feature requires the `helm` command to be available in the user's path.
+
+Supported values are:
+
+  * `grafana`*: To create dashboards and query `loki`, `prometheus` and `tempo`.
+  * `kube-state-metrics`: For exposing metrics for Kubernetes and CAPI resources to `prometheus`.
+  * `loki`: To receive and store logs.
+  * `metrics-server`: To enable `kubectl top node/pod`.
+  * `prometheus`*: For collecting metrics from Kubernetes.
+  * `promtail`: For providing pod logs to `loki`.
+  * `parca`*: For visualizing profiling data.
+  * `tempo`: To store traces.
+  * `visualizer`*: Visualize Cluster API resources for each cluster, provide quick access to the specs and status of any resource.
+
+\*: Note: the UI will be accessible via a link in the tilt console
 
 **debug** (Map{string: Map} default{}): A map of named configurations for the provider. The key is the name of the provider.
 
@@ -215,7 +271,7 @@ Supported settings:
     }
     ```
 
-    ###### Goland / Intellij
+    ###### Goland / IntelliJ
     With the above example, you can configure [a Go Remote run/debug
     configuration](https://www.jetbrains.com/help/go/attach-to-running-go-processes-with-debugger.html#step-3-create-the-remote-run-debug-configuration-on-the-client-computer)
     pointing at port 30000.
@@ -244,12 +300,12 @@ With this config, the respective managers will be invoked with:
 manager --logging-format=json
 ```
 
-### Run Tilt!
+### Create a kind cluster and run Tilt!
 
-To launch your development environment, run
+To create a pre-configured kind cluster (if you have not already done so) and launch your development environment, run
 
 ```bash
-tilt up
+make tilt-up
 ```
 
 This will open the command-line HUD as well as a web browser interface. You can monitor Tilt's status in either
@@ -258,7 +314,43 @@ create a cluster. There are [example worker cluster
 configs](https://github.com/kubernetes-sigs/cluster-api/tree/main/test/infrastructure/docker/examples) available.
 These can be customized for your specific needs.
 
-<aside class="note">
+### Deploying a workload cluster
+
+After your kind management cluster is up and running with Tilt, you can deploy a workload clusters in the Tilt web UI based off of YAML templates from the directories specified in
+the `template_dirs` field from the [tilt-settings.yaml](#tilt-settings-fields) file (default `./test/infrastructure/docker/templates`).
+
+Templates should be named according to clusterctl conventions:
+
+- template files must be named `cluster-template-{name}.yaml`; those files will be accessible in the Tilt web UI under the label grouping `{provider-label}.templates`, i.e. `CAPD.templates`.
+- cluster class files must be named `clusterclass-{name}.yaml`; those file will be accessible in the Tilt web UI under the label grouping `{provider-label}.clusterclasses`, i.e. `CAPD.clusterclasses`.
+
+By selecting one of those items in the Tilt web UI set of buttons will appear, allowing to create - with a dropdown for customizing variable substitutions - or delete clusters.
+Custom values for variable substitutions can be set using `kustomize_substitutions` in `tilt-settings.yaml`, e.g.
+
+```yaml
+kustomize_substitutions:
+  NAMESPACE: "default"
+  KUBERNETES_VERSION: "v1.28.0"
+  CONTROL_PLANE_MACHINE_COUNT: "1"
+  WORKER_MACHINE_COUNT: "3"
+# Note: kustomize substitutions expects the values to be strings. This can be achieved by wrapping the values in quotation marks.
+```
+
+### Cleaning up your kind cluster and development environment
+
+After stopping Tilt, you can clean up your kind cluster and development environment by running
+
+```bash
+make clean-kind
+```
+
+To remove all generated files, run
+
+```bash
+make clean
+```
+
+Note that you must run `make clean` or `make clean-charts` to fetch new versions of charts deployed using `deploy_observability` in `tilt-settings.yaml`.
 
 <h1>Use of clusterctl</h1>
 
@@ -270,14 +362,18 @@ This limitation is an acceptable trade-off while executing fast dev-test iterati
 you are interested in testing clusterctl workflows, you should refer to the
 [clusterctl developer instructions](../clusterctl/developers.md).
 
-</aside>
-
 ## Available providers
 
 The following providers are currently defined in the Tiltfile:
 
-* **core**: cluster-api itself (Cluster/Machine/MachineDeployment/MachineSet/KubeadmConfig/KubeadmControlPlane)
-* **docker**: Docker provider (DockerCluster/DockerMachine)
+* **core**: cluster-api itself
+* **kubeadm-bootstrap**: kubeadm bootstrap provider
+* **kubeadm-control-plane**: kubeadm control-plane provider
+* **docker**: Docker infrastructure provider
+* **in-memory**: In-memory infrastructure provider
+* **test-extension**: Runtime extension used by CAPI E2E tests
+
+Additional providers can be added by following the procedure described in following paragraphs:
 
 ### tilt-provider configuration
 
@@ -286,9 +382,14 @@ A provider must supply a `tilt-provider.yaml` file describing how to build it. H
 ```yaml
 name: aws
 config:
+<<<<<<< HEAD
   image: "gcr.io/k8s-staging-cluster-api-aws/cluster-api-aws-controller",
   label: CAPA
+=======
+  image: "gcr.io/k8s-staging-cluster-api-aws/cluster-api-aws-controller"
+>>>>>>> v1.5.7
   live_reload_deps: ["main.go", "go.mod", "go.sum", "api", "cmd", "controllers", "pkg"]
+  label: CAPA
 ```
 
 
@@ -305,6 +406,9 @@ build it.
 
 **live_reload_deps**: a list of files/directories to watch. If any of them changes, Tilt rebuilds the manager binary
 for the provider and performs a live update of the running container.
+
+**version**: allows to define the version to be used for the Provider CR. If empty, a default version will 
+be used.
 
 **additional_docker_helper_commands** (String, default=""): Additional commands to be run in the helper image
 docker build. e.g.
@@ -331,6 +435,12 @@ Set to `false` if your provider does not have a ./config folder or you do not wa
 **label** (String, default=provider name): The label to be used to group provider components in the tilt UI
 in tilt version >= v0.22.2 (see https://blog.tilt.dev/2021/08/09/resource-grouping.html); as a convention,
 provider abbreviation should be used (CAPD, KCP etc.).
+
+**additional_resources** ([]string, default=[]): A list of paths to yaml file to be loaded into the tilt cluster;
+e.g. use this to deploy an ExtensionConfig object for a RuntimeExtension provider.
+
+**resource_deps** ([]string, default=[]): A list of tilt resource names to be installed before the current provider;
+e.g. set this to ["capi_controller"] to ensure that this provider gets installed after Cluster API.
 
 ## Customizing Tilt
 
@@ -365,7 +475,7 @@ possible (the container images do not need the entire go toolchain, source code,
 
 ## IDE support for Tiltfile
 
-For Intellij, Syntax highlighting for the Tiltfile can be configured with a TextMate Bundle. For instructions, please see:
+For IntelliJ, Syntax highlighting for the Tiltfile can be configured with a TextMate Bundle. For instructions, please see:
 [Tiltfile TextMate Bundle](https://github.com/tilt-dev/tiltfile.tmbundle).
 
 For VSCode the [Bazel plugin](https://marketplace.visualstudio.com/items?itemName=BazelBuild.vscode-bazel) can be used, it provides
@@ -375,3 +485,13 @@ syntax highlighting and auto-formatting. To enable it for Tiltfile a file associ
   "Tiltfile": "starlark",
 },
 ```
+
+## Using Podman
+
+[Podman](https://podman.io) can be used instead of Docker by following these actions:
+
+1. Enable the podman unix socket (eg. `systemctl --user enable --now podman.socket` on Fedora)
+1. Set `build_engine` to `podman` in `tilt-settings.yaml` (optional, only if both Docker & podman are installed)
+1. Define the env variable `DOCKER_HOST` to the right socket while running tilt (eg. `DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock tilt up`)
+
+NB: The socket defined by `DOCKER_HOST` is used only for the `hack/tools/tilt-prepare` command, the image build is running the `podman build`/`podman push` commands.

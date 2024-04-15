@@ -17,6 +17,7 @@ limitations under the License.
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,7 +39,7 @@ import (
 
 func Test_providerComponents_Delete(t *testing.T) {
 	labels := map[string]string{
-		clusterv1.ProviderLabelName: "infrastructure-infra",
+		clusterv1.ProviderNameLabel: "infrastructure-infra",
 	}
 
 	crd := unstructured.Unstructured{}
@@ -267,10 +269,10 @@ func Test_providerComponents_Delete(t *testing.T) {
 				return
 			}
 
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			cs, err := proxy.NewClient()
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			for _, want := range tt.wantDiff {
 				obj := &unstructured.Unstructured{}
@@ -326,7 +328,7 @@ func Test_providerComponents_DeleteCoreProviderWebhookNamespace(t *testing.T) {
 
 		// assert length before deleting
 		_ = proxyClient.List(ctx, &nsList)
-		g.Expect(len(nsList.Items)).Should(Equal(1))
+		g.Expect(nsList.Items).Should(HaveLen(1))
 
 		c := newComponentsClient(proxy)
 		err := c.DeleteWebhookNamespace()
@@ -334,13 +336,13 @@ func Test_providerComponents_DeleteCoreProviderWebhookNamespace(t *testing.T) {
 
 		// assert length after deleting
 		_ = proxyClient.List(ctx, &nsList)
-		g.Expect(len(nsList.Items)).Should(Equal(0))
+		g.Expect(nsList.Items).Should(BeEmpty())
 	})
 }
 
 func Test_providerComponents_Create(t *testing.T) {
 	labelsOne := map[string]string{
-		clusterv1.ProviderLabelName: "infrastructure-infra",
+		clusterv1.ProviderNameLabel: "infrastructure-infra",
 	}
 	commonObjects := []client.Object{
 		// Namespace for the provider
@@ -444,7 +446,7 @@ func Test_providerComponents_Create(t *testing.T) {
 			for _, obj := range tt.args.objectsToCreate {
 				uns := &unstructured.Unstructured{}
 				if err := scheme.Scheme.Convert(obj, uns, nil); err != nil {
-					g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).NotTo(HaveOccurred())
+					g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).ToNot(HaveOccurred())
 				}
 				unstructuredObjectsToCreate = append(unstructuredObjectsToCreate, *uns)
 			}
@@ -454,10 +456,10 @@ func Test_providerComponents_Create(t *testing.T) {
 				return
 			}
 
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			cs, err := proxy.NewClient()
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			for _, item := range tt.want {
 				obj := &unstructured.Unstructured{}
@@ -479,17 +481,92 @@ func Test_providerComponents_Create(t *testing.T) {
 				if item.GetObjectKind().GroupVersionKind().Kind == "Pod" {
 					p1, okp1 := item.(*corev1.Pod)
 					if !(okp1) {
-						g.Expect(fmt.Errorf("%v %v could retrieve pod", err.Error(), obj)).NotTo(HaveOccurred())
+						g.Expect(fmt.Errorf("%v %v could retrieve pod", err.Error(), obj)).ToNot(HaveOccurred())
 					}
 					p2 := &corev1.Pod{}
 					if err := scheme.Scheme.Convert(obj, p2, nil); err != nil {
-						g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).NotTo(HaveOccurred())
+						g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).ToNot(HaveOccurred())
 					}
 					if len(p1.Spec.Containers) == 0 || len(p2.Spec.Containers) == 0 {
-						g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).NotTo(HaveOccurred())
+						g.Expect(fmt.Errorf("%v %v could not be converted to unstructured", err.Error(), obj)).ToNot(HaveOccurred())
 					}
 					g.Expect(p1.Spec.Containers[0].Image).To(Equal(p2.Spec.Containers[0].Image), cmp.Diff(obj.GetNamespace(), item.GetNamespace()))
 				}
+			}
+		})
+	}
+}
+
+func Test_providerComponents_ValidateNoObjectsExist(t *testing.T) {
+	labels := map[string]string{
+		clusterv1.ProviderNameLabel: "infrastructure-infra",
+	}
+
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "CustomResourceDefinition",
+			APIVersion: apiextensionsv1.SchemeGroupVersion.Identifier(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "crd1",
+			Labels: labels,
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "some.group",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				ListKind: "SomeCRDList",
+				Kind:     "SomeCRD",
+			},
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{Name: "v1", Storage: true},
+			},
+		},
+	}
+	crd.ObjectMeta.Labels[clusterctlv1.ClusterctlLabel] = ""
+
+	cr := &unstructured.Unstructured{}
+	cr.SetAPIVersion("some.group/v1")
+	cr.SetKind("SomeCRD")
+	cr.SetName("cr1")
+
+	tests := []struct {
+		name     string
+		provider clusterctlv1.Provider
+		initObjs []client.Object
+		wantErr  bool
+	}{
+		{
+			name:     "No objects exist",
+			provider: clusterctlv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "infrastructure-infra", Namespace: "ns1"}, ProviderName: "infra", Type: string(clusterctlv1.InfrastructureProviderType)},
+			initObjs: []client.Object{},
+			wantErr:  false,
+		},
+		{
+			name:     "CRD exists but no objects",
+			provider: clusterctlv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "infrastructure-infra", Namespace: "ns1"}, ProviderName: "infra", Type: string(clusterctlv1.InfrastructureProviderType)},
+			initObjs: []client.Object{
+				crd,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "CRD exists but and also objects",
+			provider: clusterctlv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "infrastructure-infra", Namespace: "ns1"}, ProviderName: "infra", Type: string(clusterctlv1.InfrastructureProviderType)},
+			initObjs: []client.Object{
+				crd,
+				cr,
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxy := test.NewFakeProxy().WithObjs(tt.initObjs...)
+
+			c := newComponentsClient(proxy)
+
+			if err := c.ValidateNoObjectsExist(context.Background(), tt.provider); (err != nil) != tt.wantErr {
+				t.Errorf("providerComponents.ValidateNoObjectsExist() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -53,25 +53,37 @@ func TestMachineSetTopologyFinalizer(t *testing.T) {
 			},
 		}).
 		WithLabels(map[string]string{
+<<<<<<< HEAD
 			clusterv1.MachineDeploymentLabelName: mdName,
+=======
+			clusterv1.MachineDeploymentNameLabel: mdName,
+>>>>>>> v1.5.7
 			clusterv1.ClusterTopologyOwnedLabel:  "",
 		})
 
 	ms := msBuilder.Build()
 	msWithFinalizer := msBuilder.Build()
 	msWithFinalizer.Finalizers = []string{clusterv1.MachineSetTopologyFinalizer}
+<<<<<<< HEAD
 	msWithDeletionTimestamp := msBuilder.Build()
 	deletionTimestamp := metav1.Now()
 	msWithDeletionTimestamp.DeletionTimestamp = &deletionTimestamp
 
 	msWithDeletionTimestampAndFinalizer := msWithDeletionTimestamp.DeepCopy()
 	msWithDeletionTimestampAndFinalizer.Finalizers = []string{clusterv1.MachineSetTopologyFinalizer}
+=======
+>>>>>>> v1.5.7
 
 	testCases := []struct {
 		name            string
 		ms              *clusterv1.MachineSet
 		expectFinalizer bool
 	}{
+<<<<<<< HEAD
+=======
+		// Note: We are not testing the case of a MS with deletionTimestamp and no finalizer.
+		// This case is impossible to reproduce in fake client without deleting the object.
+>>>>>>> v1.5.7
 		{
 			name:            "should add ClusterTopology finalizer to a MachineSet with no finalizer",
 			ms:              ms,
@@ -82,11 +94,14 @@ func TestMachineSetTopologyFinalizer(t *testing.T) {
 			ms:              msWithFinalizer,
 			expectFinalizer: true,
 		},
+<<<<<<< HEAD
 		{
 			name:            "should not add ClusterTopology finalizer on MachineSet with Deletion Timestamp and no finalizer ",
 			ms:              msWithDeletionTimestamp,
 			expectFinalizer: false,
 		},
+=======
+>>>>>>> v1.5.7
 	}
 
 	for _, tc := range testCases {
@@ -106,7 +121,11 @@ func TestMachineSetTopologyFinalizer(t *testing.T) {
 			_, err := msr.Reconcile(ctx, reconcile.Request{
 				NamespacedName: util.ObjectKey(tc.ms),
 			})
+<<<<<<< HEAD
 			g.Expect(err).NotTo(HaveOccurred())
+=======
+			g.Expect(err).ToNot(HaveOccurred())
+>>>>>>> v1.5.7
 
 			key := client.ObjectKey{Namespace: tc.ms.Namespace, Name: tc.ms.Name}
 			var actual clusterv1.MachineSet
@@ -131,10 +150,11 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 		WithBootstrapTemplate(msBT).
 		WithInfrastructureTemplate(msIMT).
 		WithLabels(map[string]string{
-			clusterv1.MachineDeploymentLabelName: mdName,
+			clusterv1.MachineDeploymentNameLabel: mdName,
 		}).
 		Build()
 	ms.SetDeletionTimestamp(&deletionTimeStamp)
+	ms.SetFinalizers([]string{clusterv1.MachineSetTopologyFinalizer})
 	ms.SetOwnerReferences([]metav1.OwnerReference{
 		{
 			Kind:       "MachineDeployment",
@@ -146,6 +166,9 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 	t.Run("Should delete templates of a MachineSet", func(t *testing.T) {
 		g := NewWithT(t)
 
+		// Copying the MS so changes made by reconcileDelete do not affect other tests.
+		ms := ms.DeepCopy()
+
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(fakeScheme).
 			WithObjects(ms, msBT, msIMT).
@@ -155,13 +178,10 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			Client:    fakeClient,
 			APIReader: fakeClient,
 		}
-		_, err := r.reconcileDelete(ctx, ms)
+		err := r.reconcileDelete(ctx, ms)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		afterMS := &clusterv1.MachineSet{}
-		g.Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(ms), afterMS)).To(Succeed())
-
-		g.Expect(controllerutil.ContainsFinalizer(afterMS, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
+		g.Expect(controllerutil.ContainsFinalizer(ms, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
 		g.Expect(templateExists(fakeClient, msBT)).To(BeFalse())
 		g.Expect(templateExists(fakeClient, msIMT)).To(BeFalse())
 	})
@@ -173,10 +193,11 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 		msWithoutBootstrapTemplate := builder.MachineSet(metav1.NamespaceDefault, "msWithoutBootstrapTemplate").
 			WithInfrastructureTemplate(msWithoutBootstrapTemplateIMT).
 			WithLabels(map[string]string{
-				clusterv1.MachineDeploymentLabelName: mdName,
+				clusterv1.MachineDeploymentNameLabel: mdName,
 			}).
 			Build()
 		msWithoutBootstrapTemplate.SetDeletionTimestamp(&deletionTimeStamp)
+		msWithoutBootstrapTemplate.SetFinalizers([]string{clusterv1.MachineSetTopologyFinalizer})
 		msWithoutBootstrapTemplate.SetOwnerReferences([]metav1.OwnerReference{
 			{
 				Kind:       "MachineDeployment",
@@ -194,18 +215,18 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			Client:    fakeClient,
 			APIReader: fakeClient,
 		}
-		_, err := r.reconcileDelete(ctx, msWithoutBootstrapTemplate)
+		err := r.reconcileDelete(ctx, msWithoutBootstrapTemplate)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		afterMS := &clusterv1.MachineSet{}
-		g.Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(msWithoutBootstrapTemplate), afterMS)).To(Succeed())
-
-		g.Expect(controllerutil.ContainsFinalizer(afterMS, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
+		g.Expect(controllerutil.ContainsFinalizer(msWithoutBootstrapTemplate, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
 		g.Expect(templateExists(fakeClient, msWithoutBootstrapTemplateIMT)).To(BeFalse())
 	})
 
 	t.Run("Should not delete templates of a MachineSet when they are still in use in a MachineDeployment", func(t *testing.T) {
 		g := NewWithT(t)
+
+		// Copying the MS so changes made by reconcileDelete do not affect other tests.
+		ms := ms.DeepCopy()
 
 		md := builder.MachineDeployment(metav1.NamespaceDefault, "md").
 			WithBootstrapTemplate(msBT).
@@ -221,13 +242,10 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			Client:    fakeClient,
 			APIReader: fakeClient,
 		}
-		_, err := r.reconcileDelete(ctx, ms)
+		err := r.reconcileDelete(ctx, ms)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		afterMS := &clusterv1.MachineSet{}
-		g.Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(ms), afterMS)).To(Succeed())
-
-		g.Expect(controllerutil.ContainsFinalizer(afterMS, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
+		g.Expect(controllerutil.ContainsFinalizer(ms, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
 		g.Expect(templateExists(fakeClient, msBT)).To(BeTrue())
 		g.Expect(templateExists(fakeClient, msIMT)).To(BeTrue())
 	})
@@ -240,6 +258,7 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			WithInfrastructureTemplate(msIMT).
 			Build()
 		md.SetDeletionTimestamp(&deletionTimeStamp)
+		md.SetFinalizers([]string{clusterv1.MachineDeploymentTopologyFinalizer})
 
 		// anotherMS is another MachineSet of the same MachineDeployment using the same templates.
 		// Because anotherMS is not in deleting, reconcileDelete should not delete the templates.
@@ -247,7 +266,7 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			WithBootstrapTemplate(msBT).
 			WithInfrastructureTemplate(msIMT).
 			WithLabels(map[string]string{
-				clusterv1.MachineDeploymentLabelName: mdName,
+				clusterv1.MachineDeploymentNameLabel: mdName,
 			}).
 			Build()
 		anotherMS.SetOwnerReferences([]metav1.OwnerReference{
@@ -267,13 +286,10 @@ func TestMachineSetReconciler_ReconcileDelete(t *testing.T) {
 			Client:    fakeClient,
 			APIReader: fakeClient,
 		}
-		_, err := r.reconcileDelete(ctx, ms)
+		err := r.reconcileDelete(ctx, ms)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		afterMS := &clusterv1.MachineSet{}
-		g.Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(ms), afterMS)).To(Succeed())
-
-		g.Expect(controllerutil.ContainsFinalizer(afterMS, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
+		g.Expect(controllerutil.ContainsFinalizer(ms, clusterv1.MachineSetTopologyFinalizer)).To(BeFalse())
 		g.Expect(templateExists(fakeClient, msBT)).To(BeTrue())
 		g.Expect(templateExists(fakeClient, msIMT)).To(BeTrue())
 	})

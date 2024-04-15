@@ -26,10 +26,13 @@ type DockerMachineTemplateSpec struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:deprecatedversion
 // +kubebuilder:resource:path=dockermachinetemplates,scope=Namespaced,categories=cluster-api
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of DockerMachineTemplate"
 
 // DockerMachineTemplate is the Schema for the dockermachinetemplates API.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type DockerMachineTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -40,6 +43,8 @@ type DockerMachineTemplate struct {
 // +kubebuilder:object:root=true
 
 // DockerMachineTemplateList contains a list of DockerMachineTemplate.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type DockerMachineTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

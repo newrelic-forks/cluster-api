@@ -18,9 +18,9 @@ test specs for the most common Cluster API use cases.
 
 Each E2E test requires a set of artifacts to be available:
 
-- Binaries & docker images for Kubernetes, CNI, CRI & CSI
-- Manifests & docker images for the Cluster API core components
-- Manifests & docker images for the Cluster API infrastructure provider; in most cases
+- Binaries & Docker images for Kubernetes, CNI, CRI & CSI
+- Manifests & Docker images for the Cluster API core components
+- Manifests & Docker images for the Cluster API infrastructure provider; in most cases
   machine images are also required (AMI, OVA etc.)
 - Credentials for the target infrastructure provider
 - Other support tools (e.g. kustomize, gsutil etc.)
@@ -76,16 +76,6 @@ This method:
 - Runs `clusterctl init` using the above local repository.
 - Waits for the providers controllers to be running.
 - Creates log watchers for all the providers
-
-<aside class="note">
-
-<h1>Deprecated InitManagementCluster method</h1>
-
-The [Cluster API test framework] also includes a [deprecated InitManagementCluster method] implementation,
-that was used before the introduction of clusterctl. This might be removed in future releases
-of the test framework.
-
-</aside>
 
 ## Writing test specs
 
@@ -201,8 +191,6 @@ test specs for the most common Cluster API use cases.
 <!-- links -->
 [Cluster API quick start]:  ../user/quick-start.md
 [Cluster API test framework]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc
-[deprecated E2E config file]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#Config
-[deprecated InitManagementCluster method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#InitManagementCluster
 [Apply method]: https://pkg.go.dev/sigs.k8s.io/cluster-api/test/framework?tab=doc#Applier
 [CAPA E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-aws/blob/main/scripts/ci-e2e.sh
 [CAPG E2E tests]: https://github.com/kubernetes-sigs/cluster-api-provider-gcp/blob/main/scripts/ci-e2e.sh

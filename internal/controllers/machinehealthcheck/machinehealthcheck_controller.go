@@ -34,12 +34,13 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/api/v1beta1/index"
@@ -84,39 +85,36 @@ type Reconciler struct {
 }
 
 func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
-	controller, err := ctrl.NewControllerManagedBy(mgr).
+	c, err := ctrl.NewControllerManagedBy(mgr).
 		For(&clusterv1.MachineHealthCheck{}).
 		Watches(
-			&source.Kind{Type: &clusterv1.Machine{}},
+			&clusterv1.Machine{},
 			handler.EnqueueRequestsFromMapFunc(r.machineToMachineHealthCheck),
 		).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
-		Build(r)
+		Watches(
+			&clusterv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(r.clusterToMachineHealthCheck),
+			builder.WithPredicates(
+				// TODO: should this wait for Cluster.Status.InfrastructureReady similar to Infra Machine resources?
+				predicates.All(ctrl.LoggerFrom(ctx),
+					predicates.ClusterUnpaused(ctrl.LoggerFrom(ctx)),
+					predicates.ResourceHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue),
+				),
+			),
+		).Build(r)
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
 	}
-	err = controller.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
-		handler.EnqueueRequestsFromMapFunc(r.clusterToMachineHealthCheck),
-		// TODO: should this wait for Cluster.Status.InfrastructureReady similar to Infra Machine resources?
-		predicates.All(ctrl.LoggerFrom(ctx),
-			predicates.ClusterUnpaused(ctrl.LoggerFrom(ctx)),
-			predicates.ResourceHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue),
-		),
-	)
-	if err != nil {
-		return errors.Wrap(err, "failed to add Watch for Clusters to controller manager")
-	}
 
-	r.controller = controller
+	r.controller = c
 	r.recorder = mgr.GetEventRecorderFor("machinehealthcheck-controller")
 	return nil
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
-	log.Info("Reconciling")
 
 	// Fetch the MachineHealthCheck instance
 	m := &clusterv1.MachineHealthCheck{}
@@ -132,7 +130,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	log = log.WithValues("cluster", m.Spec.ClusterName)
+	log = log.WithValues("Cluster", klog.KRef(m.Namespace, m.Spec.ClusterName))
 	ctx = ctrl.LoggerInto(ctx, log)
 
 	cluster, err := util.GetClusterByName(ctx, r.Client, m.Namespace, m.Spec.ClusterName)
@@ -170,14 +168,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	if m.Labels == nil {
 		m.Labels = make(map[string]string)
 	}
-	m.Labels[clusterv1.ClusterLabelName] = m.Spec.ClusterName
+	m.Labels[clusterv1.ClusterNameLabel] = m.Spec.ClusterName
 
 	result, err := r.reconcile(ctx, log, cluster, m)
 	if err != nil {
 		// Requeue if the reconcile failed because the ClusterCacheTracker was locked for
 		// the current cluster because of concurrent access.
 		if errors.Is(err, remote.ErrClusterLocked) {
+<<<<<<< HEAD
 			log.V(5).Info("Requeueing because another worker has the lock on the ClusterCacheTracker")
+=======
+			log.V(5).Info("Requeuing because another worker has the lock on the ClusterCacheTracker")
+>>>>>>> v1.5.7
 			return ctrl.Result{Requeue: true}, nil
 		}
 		log.Error(err, "Failed to reconcile MachineHealthCheck")
@@ -192,22 +194,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 
 func (r *Reconciler) reconcile(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, m *clusterv1.MachineHealthCheck) (ctrl.Result, error) {
 	// Ensure the MachineHealthCheck is owned by the Cluster it belongs to
-	m.OwnerReferences = util.EnsureOwnerRef(m.OwnerReferences, metav1.OwnerReference{
+	m.SetOwnerReferences(util.EnsureOwnerRef(m.GetOwnerReferences(), metav1.OwnerReference{
 		APIVersion: clusterv1.GroupVersion.String(),
 		Kind:       "Cluster",
 		Name:       cluster.Name,
 		UID:        cluster.UID,
-	})
+	}))
 
-	// Get the remote cluster cache to use as a client.Reader.
-	remoteClient, err := r.Tracker.GetClient(ctx, util.ObjectKey(cluster))
-	if err != nil {
-		logger.Error(err, "error creating remote cluster cache")
-		return ctrl.Result{}, err
-	}
+	// If the cluster is already initialized, get the remote cluster cache to use as a client.Reader.
+	var remoteClient client.Client
+	if conditions.IsTrue(cluster, clusterv1.ControlPlaneInitializedCondition) {
+		var err error
+		remoteClient, err = r.Tracker.GetClient(ctx, util.ObjectKey(cluster))
+		if err != nil {
+			logger.Error(err, "error creating remote cluster cache")
+			return ctrl.Result{}, err
+		}
 
+<<<<<<< HEAD
 	if err := r.watchClusterNodes(ctx, cluster); err != nil {
 		return ctrl.Result{}, err
+=======
+		if err := r.watchClusterNodes(ctx, cluster); err != nil {
+			return ctrl.Result{}, err
+		}
+>>>>>>> v1.5.7
 	}
 
 	// fetch all targets
@@ -322,7 +333,7 @@ func (r *Reconciler) reconcile(ctx context.Context, logger logr.Logger, cluster 
 
 	// handle update errors
 	if len(errList) > 0 {
-		logger.V(3).Info("Error(s) marking machine, requeueing")
+		logger.V(3).Info("Error(s) marking machine, requeuing")
 		return reconcile.Result{}, kerrors.NewAggregate(errList)
 	}
 
@@ -394,7 +405,7 @@ func (r *Reconciler) patchUnhealthyTargets(ctx context.Context, logger logr.Logg
 
 				from, err := external.Get(ctx, r.Client, m.Spec.RemediationTemplate, t.Machine.Namespace)
 				if err != nil {
-					conditions.MarkFalse(m, clusterv1.ExternalRemediationTemplateAvailable, clusterv1.ExternalRemediationTemplateNotFound, clusterv1.ConditionSeverityError, err.Error())
+					conditions.MarkFalse(m, clusterv1.ExternalRemediationTemplateAvailableCondition, clusterv1.ExternalRemediationTemplateNotFoundReason, clusterv1.ConditionSeverityError, err.Error())
 					errList = append(errList, errors.Wrapf(err, "error retrieving remediation template %v %q for machine %q in namespace %q within cluster %q", m.Spec.RemediationTemplate.GroupVersionKind(), m.Spec.RemediationTemplate.Name, t.Machine.Name, t.Machine.Namespace, m.Spec.ClusterName))
 					return errList
 				}
@@ -423,7 +434,7 @@ func (r *Reconciler) patchUnhealthyTargets(ctx context.Context, logger logr.Logg
 				logger.Info("Target has failed health check, creating an external remediation request", "remediation request name", to.GetName(), "target", t.string(), "reason", condition.Reason, "message", condition.Message)
 				// Create the external clone.
 				if err := r.Client.Create(ctx, to); err != nil {
-					conditions.MarkFalse(m, clusterv1.ExternalRemediationRequestAvailable, clusterv1.ExternalRemediationRequestCreationFailed, clusterv1.ConditionSeverityError, err.Error())
+					conditions.MarkFalse(m, clusterv1.ExternalRemediationRequestAvailableCondition, clusterv1.ExternalRemediationRequestCreationFailedReason, clusterv1.ConditionSeverityError, err.Error())
 					errList = append(errList, errors.Wrapf(err, "error creating remediation request for machine %q in namespace %q within cluster %q", t.Machine.Name, t.Machine.Namespace, t.Machine.Spec.ClusterName))
 					return errList
 				}
@@ -454,7 +465,7 @@ func (r *Reconciler) patchUnhealthyTargets(ctx context.Context, logger logr.Logg
 
 // clusterToMachineHealthCheck maps events from Cluster objects to
 // MachineHealthCheck objects that belong to the Cluster.
-func (r *Reconciler) clusterToMachineHealthCheck(o client.Object) []reconcile.Request {
+func (r *Reconciler) clusterToMachineHealthCheck(ctx context.Context, o client.Object) []reconcile.Request {
 	c, ok := o.(*clusterv1.Cluster)
 	if !ok {
 		panic(fmt.Sprintf("Expected a Cluster, got %T", o))
@@ -462,10 +473,10 @@ func (r *Reconciler) clusterToMachineHealthCheck(o client.Object) []reconcile.Re
 
 	mhcList := &clusterv1.MachineHealthCheckList{}
 	if err := r.Client.List(
-		context.TODO(),
+		ctx,
 		mhcList,
 		client.InNamespace(c.Namespace),
-		client.MatchingLabels{clusterv1.ClusterLabelName: c.Name},
+		client.MatchingLabels{clusterv1.ClusterNameLabel: c.Name},
 	); err != nil {
 		return nil
 	}
@@ -481,7 +492,7 @@ func (r *Reconciler) clusterToMachineHealthCheck(o client.Object) []reconcile.Re
 
 // machineToMachineHealthCheck maps events from Machine objects to
 // MachineHealthCheck objects that monitor the given machine.
-func (r *Reconciler) machineToMachineHealthCheck(o client.Object) []reconcile.Request {
+func (r *Reconciler) machineToMachineHealthCheck(ctx context.Context, o client.Object) []reconcile.Request {
 	m, ok := o.(*clusterv1.Machine)
 	if !ok {
 		panic(fmt.Sprintf("Expected a Machine, got %T", o))
@@ -489,10 +500,10 @@ func (r *Reconciler) machineToMachineHealthCheck(o client.Object) []reconcile.Re
 
 	mhcList := &clusterv1.MachineHealthCheckList{}
 	if err := r.Client.List(
-		context.TODO(),
+		ctx,
 		mhcList,
 		client.InNamespace(m.Namespace),
-		client.MatchingLabels{clusterv1.ClusterLabelName: m.Spec.ClusterName},
+		client.MatchingLabels{clusterv1.ClusterNameLabel: m.Spec.ClusterName},
 	); err != nil {
 		return nil
 	}
@@ -508,18 +519,18 @@ func (r *Reconciler) machineToMachineHealthCheck(o client.Object) []reconcile.Re
 	return requests
 }
 
-func (r *Reconciler) nodeToMachineHealthCheck(o client.Object) []reconcile.Request {
+func (r *Reconciler) nodeToMachineHealthCheck(ctx context.Context, o client.Object) []reconcile.Request {
 	node, ok := o.(*corev1.Node)
 	if !ok {
 		panic(fmt.Sprintf("Expected a corev1.Node, got %T", o))
 	}
 
-	machine, err := getMachineFromNode(context.TODO(), r.Client, node.Name)
+	machine, err := getMachineFromNode(ctx, r.Client, node.Name)
 	if machine == nil || err != nil {
 		return nil
 	}
 
-	return r.machineToMachineHealthCheck(machine)
+	return r.machineToMachineHealthCheck(ctx, machine)
 }
 
 func (r *Reconciler) watchClusterNodes(ctx context.Context, cluster *clusterv1.Cluster) error {

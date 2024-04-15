@@ -17,6 +17,7 @@
 set -o errexit
 set -o pipefail
 
+
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "${REPO_ROOT}" || exit 1
 
@@ -53,7 +54,7 @@ kind:prepullAdditionalImages
 # Configure e2e tests
 export GINKGO_NODES=3
 export GINKGO_NOCOLOR=true
-export GINKGO_ARGS="--failFast" # Other ginkgo args that need to be appended to the command.
+export GINKGO_ARGS="${GINKGO_ARGS:-""}"
 export E2E_CONF_FILE="${REPO_ROOT}/test/e2e/config/docker.yaml"
 export ARTIFACTS="${ARTIFACTS:-${REPO_ROOT}/_artifacts}"
 export SKIP_RESOURCE_CLEANUP=false
@@ -86,6 +87,26 @@ cleanup() {
   ctr -n moby containers list > "${ARTIFACTS_LOCAL}/containerd-containers.txt" || true
   ctr -n moby images list > "${ARTIFACTS_LOCAL}/containerd-images.txt" || true
   ctr -n moby version > "${ARTIFACTS_LOCAL}/containerd-version.txt" || true
+
+  ps -ef > "${ARTIFACTS_LOCAL}/processes-ps-ef.txt" || true
+
+  for PID in $(ps -eo pid=); do
+    echo "> PID=$PID"
+    echo ">> /proc/${PID}/status" 
+    cat "/proc/${PID}/status" || true
+    echo ">> /proc/${PID}/stack" 
+    cat "/proc/${PID}/stack" || true
+  done >> "${ARTIFACTS_LOCAL}/processes-proc-information.txt"
+
+  # Verify that no containers are running at this time
+  # Note: This verifies that all our tests clean up clusters correctly.
+  if [[ ! "$(docker ps -q | wc -l)" -eq "0" ]]
+  then
+     echo "ERROR: Found unexpected running containers:"
+     echo ""
+     docker ps
+     exit 1
+  fi
 }
 trap "cleanup" EXIT SIGINT
 
@@ -95,4 +116,4 @@ ctr -n moby events > "${ARTIFACTS_LOCAL}/containerd-events.txt" 2>&1 &
 # Run e2e tests
 mkdir -p "$ARTIFACTS"
 echo "+ run tests!"
-make -C test/e2e/ run
+make test-e2e

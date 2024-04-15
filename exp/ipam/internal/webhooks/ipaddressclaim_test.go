@@ -65,11 +65,21 @@ func TestIPAddressClaimValidateCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 			wh := IPAddressClaim{}
+<<<<<<< HEAD
 			if tt.expectErr {
 				g.Expect(wh.ValidateCreate(context.Background(), &tt.claim)).NotTo(Succeed())
 			} else {
 				g.Expect(wh.ValidateCreate(context.Background(), &tt.claim)).To(Succeed())
 			}
+=======
+			warnings, err := wh.ValidateCreate(context.Background(), &tt.claim)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+			}
+			g.Expect(warnings).To(BeEmpty())
+>>>>>>> v1.5.7
 		})
 	}
 }
@@ -113,11 +123,21 @@ func TestIPAddressClaimValidateUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 			wh := IPAddressClaim{}
+<<<<<<< HEAD
 			if tt.expectErr {
 				g.Expect(wh.ValidateUpdate(context.Background(), &tt.oldClaim, &tt.newClaim)).NotTo(Succeed())
 			} else {
 				g.Expect(wh.ValidateUpdate(context.Background(), &tt.oldClaim, &tt.newClaim)).To(Succeed())
 			}
+=======
+			warnings, err := wh.ValidateUpdate(context.Background(), &tt.oldClaim, &tt.newClaim)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+			}
+			g.Expect(warnings).To(BeEmpty())
+>>>>>>> v1.5.7
 		})
 	}
 }

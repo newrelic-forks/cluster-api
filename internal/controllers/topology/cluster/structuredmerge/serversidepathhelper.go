@@ -17,16 +17,18 @@ limitations under the License.
 package structuredmerge
 
 import (
-	"encoding/json"
+	"context"
 
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+<<<<<<< HEAD
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+=======
+	"sigs.k8s.io/cluster-api/internal/util/ssa"
+>>>>>>> v1.5.7
 	"sigs.k8s.io/cluster-api/util"
 )
 
@@ -41,7 +43,11 @@ type serverSidePatchHelper struct {
 }
 
 // NewServerSidePatchHelper returns a new PatchHelper using server side apply.
+<<<<<<< HEAD
 func NewServerSidePatchHelper(ctx context.Context, original, modified client.Object, c client.Client, opts ...HelperOption) (PatchHelper, error) {
+=======
+func NewServerSidePatchHelper(ctx context.Context, original, modified client.Object, c client.Client, ssaCache ssa.Cache, opts ...HelperOption) (PatchHelper, error) {
+>>>>>>> v1.5.7
 	// Create helperOptions for filtering the original and modified objects to the desired intent.
 	helperOptions := newHelperOptions(modified, opts...)
 
@@ -59,6 +65,7 @@ func NewServerSidePatchHelper(ctx context.Context, original, modified client.Obj
 				return nil, errors.Wrap(err, "failed to convert original object to Unstructured")
 			}
 		}
+<<<<<<< HEAD
 
 		// If the object has been created with previous custom approach for tracking managed fields, cleanup the object.
 		if _, ok := original.GetAnnotations()[clusterv1.ClusterTopologyManagedFieldsAnnotation]; ok {
@@ -66,6 +73,8 @@ func NewServerSidePatchHelper(ctx context.Context, original, modified client.Obj
 				return nil, errors.Wrap(err, "failed to cleanup legacy managed fields from original object")
 			}
 		}
+=======
+>>>>>>> v1.5.7
 	}
 
 	modifiedUnstructured := &unstructured.Unstructured{}
@@ -80,7 +89,27 @@ func NewServerSidePatchHelper(ctx context.Context, original, modified client.Obj
 
 	// Filter the modifiedUnstructured object to only contain changes intendet to be done.
 	// The originalUnstructured object will be filtered in dryRunSSAPatch using other options.
+<<<<<<< HEAD
 	filterObject(modifiedUnstructured, helperOptions)
+=======
+	ssa.FilterObject(modifiedUnstructured, &ssa.FilterObjectInput{
+		AllowedPaths: helperOptions.allowedPaths,
+		IgnorePaths:  helperOptions.ignorePaths,
+	})
+
+	// Carry over uid to match the intent to:
+	// * create (uid==""):
+	//   * if object doesn't exist => create
+	//   * if object already exists => update
+	// * update (uid!=""):
+	//   * if object doesn't exist => fail
+	//   * if object already exists => update
+	//   * This allows us to enforce that an update doesn't create an object which has been deleted.
+	modifiedUnstructured.SetUID("")
+	if originalUnstructured != nil {
+		modifiedUnstructured.SetUID(originalUnstructured.GetUID())
+	}
+>>>>>>> v1.5.7
 
 	// Carry over uid to match the intent to:
 	// * create (uid==""):
@@ -105,8 +134,14 @@ func NewServerSidePatchHelper(ctx context.Context, original, modified client.Obj
 		var err error
 		hasChanges, hasSpecChanges, err = dryRunSSAPatch(ctx, &dryRunSSAPatchInput{
 			client:               c,
+<<<<<<< HEAD
 			originalUnstructured: originalUnstructured,
 			dryRunUnstructured:   modifiedUnstructured.DeepCopy(),
+=======
+			ssaCache:             ssaCache,
+			originalUnstructured: originalUnstructured,
+			modifiedUnstructured: modifiedUnstructured.DeepCopy(),
+>>>>>>> v1.5.7
 			helperOptions:        helperOptions,
 		})
 		if err != nil {
@@ -149,6 +184,7 @@ func (h *serverSidePatchHelper) Patch(ctx context.Context) error {
 	}
 	return h.client.Patch(ctx, h.modified, client.Apply, options...)
 }
+<<<<<<< HEAD
 
 // cleanupLegacyManagedFields cleanups managed field management in place before introducing SSA.
 // NOTE: this operation can trigger a machine rollout, but this is considered acceptable given that ClusterClass is still alpha
@@ -201,3 +237,5 @@ func cleanupLegacyManagedFields(ctx context.Context, obj *unstructured.Unstructu
 
 	return c.Patch(ctx, obj, client.MergeFrom(base))
 }
+=======
+>>>>>>> v1.5.7

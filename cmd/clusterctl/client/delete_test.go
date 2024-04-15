@@ -42,7 +42,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 		name          string
 		fields        fields
 		args          args
-		wantProviders sets.String
+		wantProviders sets.Set[string]
 		wantErr       bool
 	}{
 		{
@@ -63,7 +63,28 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					DeleteAll:               true, // delete all the providers
 				},
 			},
-			wantProviders: sets.NewString(),
+			wantProviders: sets.Set[string]{},
+			wantErr:       false,
+		},
+		{
+			name: "Delete all the providers including CRDs",
+			fields: fields{
+				client: fakeClusterForDelete(),
+			},
+			args: args{
+				options: DeleteOptions{
+					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
+					IncludeNamespace:        false,
+					IncludeCRDs:             true,
+					SkipInventory:           false,
+					CoreProvider:            "",
+					BootstrapProviders:      nil,
+					InfrastructureProviders: nil,
+					ControlPlaneProviders:   nil,
+					DeleteAll:               true, // delete all the providers
+				},
+			},
+			wantProviders: sets.Set[string]{},
 			wantErr:       false,
 		},
 		{
@@ -84,7 +105,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					DeleteAll:               false,
 				},
 			},
-			wantProviders: sets.NewString(
+			wantProviders: sets.Set[string]{}.Insert(
 				capiProviderConfig.Name(),
 				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type()),
 				clusterctlv1.ManifestLabel(infraProviderConfig.Name(), infraProviderConfig.Type())),
@@ -108,7 +129,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					DeleteAll:               false,
 				},
 			},
-			wantProviders: sets.NewString(
+			wantProviders: sets.Set[string]{}.Insert(
 				capiProviderConfig.Name(),
 				clusterctlv1.ManifestLabel(bootstrapProviderConfig.Name(), bootstrapProviderConfig.Type()),
 				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type())),
@@ -132,7 +153,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					DeleteAll:               false,
 				},
 			},
-			wantProviders: sets.NewString(
+			wantProviders: sets.Set[string]{}.Insert(
 				capiProviderConfig.Name(),
 				clusterctlv1.ManifestLabel(bootstrapProviderConfig.Name(), bootstrapProviderConfig.Type()),
 				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type()),
@@ -157,7 +178,7 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 					DeleteAll:               false,
 				},
 			},
-			wantProviders: sets.NewString(
+			wantProviders: sets.Set[string]{}.Insert(
 				clusterctlv1.ManifestLabel(controlPlaneProviderConfig.Name(), controlPlaneProviderConfig.Type()),
 				clusterctlv1.ManifestLabel(infraProviderConfig.Name(), infraProviderConfig.Type())),
 			wantErr: false,
@@ -172,17 +193,17 @@ func Test_clusterctlClient_Delete(t *testing.T) {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			input := cluster.Kubeconfig(tt.args.options.Kubeconfig)
 			proxy := tt.fields.client.clusters[input].Proxy()
 			gotProviders := &clusterctlv1.ProviderList{}
 
 			c, err := proxy.NewClient()
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(c.List(ctx, gotProviders)).To(Succeed())
 
-			gotProvidersSet := sets.NewString()
+			gotProvidersSet := sets.Set[string]{}
 			for _, gotProvider := range gotProviders.Items {
 				gotProvidersSet.Insert(gotProvider.Name)
 			}

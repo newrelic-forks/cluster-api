@@ -25,6 +25,10 @@ import (
 	"time"
 
 	ignition "github.com/flatcar/ignition/config/v2_3"
+<<<<<<< HEAD
+=======
+	"github.com/go-logr/logr"
+>>>>>>> v1.5.7
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,13 +38,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	bootstrapbuilder "sigs.k8s.io/cluster-api/bootstrap/kubeadm/internal/builder"
-	fakeremote "sigs.k8s.io/cluster-api/controllers/remote/fake"
+	"sigs.k8s.io/cluster-api/controllers/remote"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/internal/test/builder"
@@ -76,11 +81,12 @@ func TestKubeadmConfigReconciler_MachineToBootstrapMapFuncReturn(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithObjects(objs...).Build()
 	reconciler := &KubeadmConfigReconciler{
-		Client: fakeClient,
+		Client:              fakeClient,
+		SecretCachingClient: fakeClient,
 	}
 	for i := 0; i < 3; i++ {
 		o := machineObjs[i]
-		configs := reconciler.MachineToBootstrapMapFunc(o)
+		configs := reconciler.MachineToBootstrapMapFunc(ctx, o)
 		if i == 1 {
 			g.Expect(configs[0].Name).To(Equal(expectedConfigName))
 		} else {
@@ -92,17 +98,24 @@ func TestKubeadmConfigReconciler_MachineToBootstrapMapFuncReturn(t *testing.T) {
 // Reconcile returns early if the kubeadm config is ready because it should never re-generate bootstrap data.
 func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfKubeadmConfigIsReady(t *testing.T) {
 	g := NewWithT(t)
-
+	cluster := builder.Cluster(metav1.NamespaceDefault, "cluster1").Build()
+	cluster.Status.InfrastructureReady = true
+	machine := builder.Machine(metav1.NamespaceDefault, "m1").WithClusterName("cluster1").Build()
 	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
+	addKubeadmConfigToMachine(config, machine)
+
 	config.Status.Ready = true
 
 	objects := []client.Object{
+		cluster,
+		machine,
 		config,
 	}
 	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -112,9 +125,109 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfKubeadmConfigIsReady(t *
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+}
+
+// Reconcile should update owner references on bootstrap secrets on creation and update.
+func TestKubeadmConfigReconciler_TestSecretOwnerReferenceReconciliation(t *testing.T) {
+	g := NewWithT(t)
+
+	clusterName := "my-cluster"
+	cluster := builder.Cluster(metav1.NamespaceDefault, clusterName).Build()
+	machine := builder.Machine(metav1.NamespaceDefault, "machine").
+		WithVersion("v1.19.1").
+		WithClusterName(clusterName).
+		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(metav1.NamespaceDefault, "cfg").Unstructured()).
+		Build()
+	machine.Spec.Bootstrap.DataSecretName = pointer.String("something")
+
+	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
+	config.SetOwnerReferences(util.EnsureOwnerRef(config.GetOwnerReferences(), metav1.OwnerReference{
+		APIVersion: machine.APIVersion,
+		Kind:       machine.Kind,
+		Name:       machine.Name,
+		UID:        machine.UID,
+	}))
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.Name,
+			Namespace: config.Namespace,
+		},
+		Type: corev1.SecretTypeBootstrapToken,
+	}
+	config.Status.Ready = true
+
+	objects := []client.Object{
+		config,
+		machine,
+		secret,
+		cluster,
+	}
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
+
+	k := &KubeadmConfigReconciler{
+		Client:              myclient,
+		SecretCachingClient: myclient,
+	}
+
+	request := ctrl.Request{
+		NamespacedName: client.ObjectKey{
+			Namespace: metav1.NamespaceDefault,
+			Name:      "cfg",
+		},
+	}
+	var err error
+	key := client.ObjectKeyFromObject(config)
+	actual := &corev1.Secret{}
+
+	t.Run("KubeadmConfig ownerReference is added on first reconcile", func(t *testing.T) {
+		_, err = k.Reconcile(ctx, request)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		g.Expect(myclient.Get(ctx, key, actual)).To(Succeed())
+
+		controllerOwner := metav1.GetControllerOf(actual)
+		g.Expect(controllerOwner).To(Not(BeNil()))
+		g.Expect(controllerOwner.Kind).To(Equal(config.Kind))
+		g.Expect(controllerOwner.Name).To(Equal(config.Name))
+	})
+
+	t.Run("KubeadmConfig ownerReference re-reconciled without error", func(t *testing.T) {
+		_, err = k.Reconcile(ctx, request)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		g.Expect(myclient.Get(ctx, key, actual)).To(Succeed())
+
+		controllerOwner := metav1.GetControllerOf(actual)
+		g.Expect(controllerOwner).To(Not(BeNil()))
+		g.Expect(controllerOwner.Kind).To(Equal(config.Kind))
+		g.Expect(controllerOwner.Name).To(Equal(config.Name))
+	})
+	t.Run("non-KubeadmConfig controller OwnerReference is replaced", func(t *testing.T) {
+		g.Expect(myclient.Get(ctx, key, actual)).To(Succeed())
+
+		actual.SetOwnerReferences([]metav1.OwnerReference{
+			{
+				APIVersion: machine.APIVersion,
+				Kind:       machine.Kind,
+				Name:       machine.Name,
+				UID:        machine.UID,
+				Controller: pointer.Bool(true),
+			}})
+		g.Expect(myclient.Update(ctx, actual)).To(Succeed())
+
+		_, err = k.Reconcile(ctx, request)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		g.Expect(myclient.Get(ctx, key, actual)).To(Succeed())
+
+		controllerOwner := metav1.GetControllerOf(actual)
+		g.Expect(controllerOwner).To(Not(BeNil()))
+		g.Expect(controllerOwner.Kind).To(Equal(config.Kind))
+		g.Expect(controllerOwner.Name).To(Equal(config.Name))
+	})
 }
 
 // Reconcile returns nil if the referenced Machine cannot be found.
@@ -134,7 +247,8 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfReferencedMachineIsNotFoun
 	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -144,27 +258,34 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfReferencedMachineIsNotFoun
 		},
 	}
 	_, err := k.Reconcile(ctx, request)
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 }
 
 // If the machine has bootstrap data secret reference, there is no need to generate more bootstrap data.
 func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfMachineHasDataSecretName(t *testing.T) {
 	g := NewWithT(t)
+	cluster := builder.Cluster(metav1.NamespaceDefault, "cluster1").Build()
+	cluster.Status.InfrastructureReady = true
+
 	machine := builder.Machine(metav1.NamespaceDefault, "machine").
 		WithVersion("v1.19.1").
+		WithClusterName("cluster1").
 		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(metav1.NamespaceDefault, "cfg").Unstructured()).
 		Build()
-	machine.Spec.Bootstrap.DataSecretName = pointer.StringPtr("something")
+	machine.Spec.Bootstrap.DataSecretName = pointer.String("something")
 
 	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
+	addKubeadmConfigToMachine(config, machine)
 	objects := []client.Object{
+		cluster,
 		machine,
 		config,
 	}
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -174,9 +295,12 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfMachineHasDataSecretName
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	actual := &bootstrapv1.KubeadmConfig{}
+	g.Expect(myclient.Get(ctx, client.ObjectKey{Namespace: config.Namespace, Name: config.Name}, actual)).To(Succeed())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+	assertHasTrueCondition(g, myclient, request, bootstrapv1.DataSecretAvailableCondition)
 }
 
 func TestKubeadmConfigReconciler_ReturnEarlyIfClusterInfraNotReady(t *testing.T) {
@@ -201,10 +325,11 @@ func TestKubeadmConfigReconciler_ReturnEarlyIfClusterInfraNotReady(t *testing.T)
 		machine,
 		config,
 	}
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -217,7 +342,7 @@ func TestKubeadmConfigReconciler_ReturnEarlyIfClusterInfraNotReady(t *testing.T)
 	expectedResult := reconcile.Result{}
 	actualResult, actualError := k.Reconcile(ctx, request)
 	g.Expect(actualResult).To(Equal(expectedResult))
-	g.Expect(actualError).NotTo(HaveOccurred())
+	g.Expect(actualError).ToNot(HaveOccurred())
 	assertHasFalseCondition(g, myclient, request, bootstrapv1.DataSecretAvailableCondition, clusterv1.ConditionSeverityInfo, bootstrapv1.WaitingForClusterInfrastructureReason)
 }
 
@@ -229,6 +354,7 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfMachineHasNoCluster(t *t
 		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(metav1.NamespaceDefault, "cfg").Unstructured()).
 		Build()
 	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
+	addKubeadmConfigToMachine(config, machine)
 
 	objects := []client.Object{
 		machine,
@@ -237,7 +363,8 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfMachineHasNoCluster(t *t
 	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -247,36 +374,7 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnEarlyIfMachineHasNoCluster(t *t
 		},
 	}
 	_, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
-}
-
-// This does not expect an error, hoping the machine gets updated with a cluster.
-func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfMachineDoesNotHaveAssociatedCluster(t *testing.T) {
-	g := NewWithT(t)
-	machine := builder.Machine(metav1.NamespaceDefault, "machine").
-		WithVersion("v1.19.1").
-		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(metav1.NamespaceDefault, "cfg").Unstructured()).
-		Build()
-	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
-
-	objects := []client.Object{
-		machine,
-		config,
-	}
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
-
-	k := &KubeadmConfigReconciler{
-		Client: myclient,
-	}
-
-	request := ctrl.Request{
-		NamespacedName: client.ObjectKey{
-			Namespace: metav1.NamespaceDefault,
-			Name:      "cfg",
-		},
-	}
-	_, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 }
 
 // This does not expect an error, hoping that the associated cluster will be created.
@@ -291,6 +389,7 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfAssociatedClusterIsNotFoun
 		Build()
 	config := newKubeadmConfig(metav1.NamespaceDefault, "cfg")
 
+	addKubeadmConfigToMachine(config, machine)
 	objects := []client.Object{
 		// intentionally omitting cluster
 		machine,
@@ -299,7 +398,8 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfAssociatedClusterIsNotFoun
 	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client: myclient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
 	}
 
 	request := ctrl.Request{
@@ -309,7 +409,7 @@ func TestKubeadmConfigReconciler_Reconcile_ReturnNilIfAssociatedClusterIsNotFoun
 		},
 	}
 	_, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 }
 
 // If the control plane isn't initialized then there is no cluster for either a worker or control plane node to join.
@@ -331,7 +431,7 @@ func TestKubeadmConfigReconciler_Reconcile_RequeueJoiningNodesIfControlPlaneNotI
 		objects []client.Object
 	}{
 		{
-			name: "requeue worker when control plane is not yet initialiezd",
+			name: "requeue worker when control plane is not yet initialized",
 			request: ctrl.Request{
 				NamespacedName: client.ObjectKey{
 					Namespace: workerJoinConfig.Namespace,
@@ -363,15 +463,16 @@ func TestKubeadmConfigReconciler_Reconcile_RequeueJoiningNodesIfControlPlaneNotI
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			myclient := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
+			myclient := fake.NewClientBuilder().WithObjects(tc.objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 			k := &KubeadmConfigReconciler{
-				Client:          myclient,
-				KubeadmInitLock: &myInitLocker{},
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			result, err := k.Reconcile(ctx, tc.request)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(result.Requeue).To(BeFalse())
 			g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
 			assertHasFalseCondition(g, myclient, tc.request, bootstrapv1.DataSecretAvailableCondition, clusterv1.ConditionSeverityInfo, clusterv1.WaitingForControlPlaneAvailableReason)
@@ -383,11 +484,19 @@ func TestKubeadmConfigReconciler_Reconcile_RequeueJoiningNodesIfControlPlaneNotI
 func TestKubeadmConfigReconciler_Reconcile_GenerateCloudConfigData(t *testing.T) {
 	g := NewWithT(t)
 
+	configName := "control-plane-init-cfg"
 	cluster := builder.Cluster(metav1.NamespaceDefault, "cluster").Build()
+	cluster.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{Host: "validhost", Port: 6443}
 	cluster.Status.InfrastructureReady = true
+	conditions.MarkTrue(cluster, clusterv1.ControlPlaneInitializedCondition)
 
 	controlPlaneInitMachine := newControlPlaneMachine(cluster, "control-plane-init-machine")
-	controlPlaneInitConfig := newControlPlaneInitKubeadmConfig(controlPlaneInitMachine.Namespace, "control-plane-init-cfg")
+	controlPlaneInitConfig := newControlPlaneInitKubeadmConfig(controlPlaneInitMachine.Namespace, configName)
+	controlPlaneInitConfig.Spec.JoinConfiguration = &bootstrapv1.JoinConfiguration{}
+	controlPlaneInitConfig.Spec.JoinConfiguration.Discovery.BootstrapToken = &bootstrapv1.BootstrapTokenDiscovery{
+		CACertHashes: []string{"...."},
+	}
+
 	addKubeadmConfigToMachine(controlPlaneInitConfig, controlPlaneInitMachine)
 
 	objects := []client.Object{
@@ -397,11 +506,13 @@ func TestKubeadmConfigReconciler_Reconcile_GenerateCloudConfigData(t *testing.T)
 	}
 	objects = append(objects, createSecrets(t, cluster, controlPlaneInitConfig)...)
 
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client:          myclient,
-		KubeadmInitLock: &myInitLocker{},
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		KubeadmInitLock:     &myInitLocker{},
 	}
 
 	request := ctrl.Request{
@@ -410,22 +521,28 @@ func TestKubeadmConfigReconciler_Reconcile_GenerateCloudConfigData(t *testing.T)
 			Name:      "control-plane-init-cfg",
 		},
 	}
+	s := &corev1.Secret{}
+	g.Expect(myclient.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: configName}, s)).ToNot(Succeed())
+
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err := getKubeadmConfig(myclient, "control-plane-init-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cfg.Status.Ready).To(BeTrue())
 	g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
 	assertHasTrueCondition(g, myclient, request, bootstrapv1.CertificatesAvailableCondition)
 	assertHasTrueCondition(g, myclient, request, bootstrapv1.DataSecretAvailableCondition)
 
+	// Expect the Secret to exist, and for it to contain some data under the "value" key.
+	g.Expect(myclient.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: configName}, s)).To(Succeed())
+	g.Expect(s.Data["value"]).ToNot(BeEmpty())
 	// Ensure that we don't fail trying to refresh any bootstrap tokens
 	_, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 }
 
 // If a control plane has no JoinConfiguration, then we will create a default and no error will occur.
@@ -451,22 +568,27 @@ func TestKubeadmConfigReconciler_Reconcile_ErrorIfJoiningControlPlaneHasInvalidC
 		controlPlaneJoinConfig,
 	}
 	objects = append(objects, createSecrets(t, cluster, controlPlaneInitConfig)...)
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client:             myclient,
-		KubeadmInitLock:    &myInitLocker{},
-		remoteClientGetter: fakeremote.NewClusterClient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		KubeadmInitLock:     &myInitLocker{},
 	}
 
 	request := ctrl.Request{
 		NamespacedName: client.ObjectKey{
 			Namespace: metav1.NamespaceDefault,
-			Name:      "control-plane-join-cfg",
+			Name:      controlPlaneJoinConfig.Name,
 		},
 	}
 	_, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
+	actualConfig := &bootstrapv1.KubeadmConfig{}
+	g.Expect(myclient.Get(ctx, client.ObjectKey{Namespace: controlPlaneJoinConfig.Namespace, Name: controlPlaneJoinConfig.Name}, actualConfig)).To(Succeed())
+	assertHasTrueCondition(g, myclient, request, bootstrapv1.DataSecretAvailableCondition)
+	assertHasTrueCondition(g, myclient, request, bootstrapv1.CertificatesAvailableCondition)
 }
 
 // If there is no APIEndpoint but everything is ready then requeue in hopes of a new APIEndpoint showing up eventually.
@@ -491,11 +613,12 @@ func TestKubeadmConfigReconciler_Reconcile_RequeueIfControlPlaneIsMissingAPIEndp
 	}
 	objects = append(objects, createSecrets(t, cluster, controlPlaneInitConfig)...)
 
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 	k := &KubeadmConfigReconciler{
-		Client:          myclient,
-		KubeadmInitLock: &myInitLocker{},
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		KubeadmInitLock:     &myInitLocker{},
 	}
 
 	request := ctrl.Request{
@@ -505,12 +628,19 @@ func TestKubeadmConfigReconciler_Reconcile_RequeueIfControlPlaneIsMissingAPIEndp
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+
+	actualConfig := &bootstrapv1.KubeadmConfig{}
+	g.Expect(myclient.Get(ctx, client.ObjectKey{Namespace: workerJoinConfig.Namespace, Name: workerJoinConfig.Name}, actualConfig)).To(Succeed())
+
+	// At this point the DataSecretAvailableCondition should not be set. CertificatesAvailableCondition should be true.
+	g.Expect(conditions.Get(actualConfig, bootstrapv1.DataSecretAvailableCondition)).To(BeNil())
+	assertHasTrueCondition(g, myclient, request, bootstrapv1.CertificatesAvailableCondition)
 }
 
-func TestReconcileIfJoinNodesAndControlPlaneIsReady(t *testing.T) {
+func TestReconcileIfJoinCertificatesAvailableConditioninNodesAndControlPlaneIsReady(t *testing.T) {
 	cluster := builder.Cluster(metav1.NamespaceDefault, "cluster").Build()
 	cluster.Status.InfrastructureReady = true
 	conditions.MarkTrue(cluster, clusterv1.ControlPlaneInitializedCondition)
@@ -562,11 +692,12 @@ func TestReconcileIfJoinNodesAndControlPlaneIsReady(t *testing.T) {
 				config,
 			}
 			objects = append(objects, createSecrets(t, cluster, config)...)
-			myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+			myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 			k := &KubeadmConfigReconciler{
-				Client:             myclient,
-				KubeadmInitLock:    &myInitLocker{},
-				remoteClientGetter: fakeremote.NewClusterClient,
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			request := ctrl.Request{
@@ -576,12 +707,12 @@ func TestReconcileIfJoinNodesAndControlPlaneIsReady(t *testing.T) {
 				},
 			}
 			result, err := k.Reconcile(ctx, request)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(result.Requeue).To(BeFalse())
 			g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 			cfg, err := getKubeadmConfig(myclient, rt.configName, metav1.NamespaceDefault)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(cfg.Status.Ready).To(BeTrue())
 			g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 			g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
@@ -589,8 +720,8 @@ func TestReconcileIfJoinNodesAndControlPlaneIsReady(t *testing.T) {
 
 			l := &corev1.SecretList{}
 			err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(len(l.Items)).To(Equal(1))
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(l.Items).To(HaveLen(1))
 		})
 	}
 }
@@ -639,11 +770,12 @@ func TestReconcileIfJoinNodePoolsAndControlPlaneIsReady(t *testing.T) {
 				config,
 			}
 			objects = append(objects, createSecrets(t, cluster, config)...)
-			myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+			myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 			k := &KubeadmConfigReconciler{
-				Client:             myclient,
-				KubeadmInitLock:    &myInitLocker{},
-				remoteClientGetter: fakeremote.NewClusterClient,
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			request := ctrl.Request{
@@ -653,20 +785,20 @@ func TestReconcileIfJoinNodePoolsAndControlPlaneIsReady(t *testing.T) {
 				},
 			}
 			result, err := k.Reconcile(ctx, request)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(result.Requeue).To(BeFalse())
 			g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 			cfg, err := getKubeadmConfig(myclient, rt.configName, metav1.NamespaceDefault)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(cfg.Status.Ready).To(BeTrue())
 			g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 			g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
 
 			l := &corev1.SecretList{}
 			err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(len(l.Items)).To(Equal(1))
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(l.Items).To(HaveLen(1))
 		})
 	}
 }
@@ -738,12 +870,13 @@ func TestBootstrapDataFormat(t *testing.T) {
 			}
 			objects = append(objects, createSecrets(t, cluster, config)...)
 
-			myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+			myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 
 			k := &KubeadmConfigReconciler{
-				Client:             myclient,
-				KubeadmInitLock:    &myInitLocker{},
-				remoteClientGetter: fakeremote.NewClusterClient,
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+				KubeadmInitLock:     &myInitLocker{},
 			}
 			request := ctrl.Request{
 				NamespacedName: client.ObjectKey{
@@ -754,11 +887,11 @@ func TestBootstrapDataFormat(t *testing.T) {
 
 			// Reconcile the KubeadmConfig resource.
 			_, err := k.Reconcile(ctx, request)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			// Verify the KubeadmConfig resource state is correct.
 			cfg, err := getKubeadmConfig(myclient, configName, metav1.NamespaceDefault)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(cfg.Status.Ready).To(BeTrue())
 			g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 
@@ -770,7 +903,7 @@ func TestBootstrapDataFormat(t *testing.T) {
 			}
 			secret := &corev1.Secret{}
 			err = myclient.Get(ctx, key, secret)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			// Verify the format field of the bootstrap data secret is correct.
 			g.Expect(string(secret.Data["format"])).To(Equal(string(tc.format)))
@@ -783,11 +916,11 @@ func TestBootstrapDataFormat(t *testing.T) {
 				// TODO: Verify the YAML document is valid cloud-config?
 				var out interface{}
 				err = yaml.Unmarshal(data, &out)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			case bootstrapv1.Ignition:
 				// Verify the bootstrap data is valid Ignition.
 				_, reports, err := ignition.Parse(data)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(reports.IsFatal()).NotTo(BeTrue())
 			}
 		})
@@ -819,11 +952,12 @@ func TestKubeadmConfigSecretCreatedStatusNotPatched(t *testing.T) {
 	}
 
 	objects = append(objects, createSecrets(t, cluster, initConfig)...)
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 	k := &KubeadmConfigReconciler{
-		Client:             myclient,
-		KubeadmInitLock:    &myInitLocker{},
-		remoteClientGetter: fakeremote.NewClusterClient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		KubeadmInitLock:     &myInitLocker{},
 	}
 	request := ctrl.Request{
 		NamespacedName: client.ObjectKey{
@@ -836,7 +970,7 @@ func TestKubeadmConfigSecretCreatedStatusNotPatched(t *testing.T) {
 			Name:      workerJoinConfig.Name,
 			Namespace: workerJoinConfig.Namespace,
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName: cluster.Name,
+				clusterv1.ClusterNameLabel: cluster.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -844,7 +978,7 @@ func TestKubeadmConfigSecretCreatedStatusNotPatched(t *testing.T) {
 					Kind:       "KubeadmConfig",
 					Name:       workerJoinConfig.Name,
 					UID:        workerJoinConfig.UID,
-					Controller: pointer.BoolPtr(true),
+					Controller: pointer.Bool(true),
 				},
 			},
 		},
@@ -857,12 +991,12 @@ func TestKubeadmConfigSecretCreatedStatusNotPatched(t *testing.T) {
 	err := myclient.Create(ctx, secret)
 	g.Expect(err).ToNot(HaveOccurred())
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err := getKubeadmConfig(myclient, "worker-join-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cfg.Status.Ready).To(BeTrue())
 	g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
@@ -896,12 +1030,13 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 	}
 
 	objects = append(objects, createSecrets(t, cluster, initConfig)...)
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}, &clusterv1.Machine{}).Build()
 	k := &KubeadmConfigReconciler{
-		Client:             myclient,
-		KubeadmInitLock:    &myInitLocker{},
-		TokenTTL:           DefaultTokenTTL,
-		remoteClientGetter: fakeremote.NewClusterClient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		KubeadmInitLock:     &myInitLocker{},
+		TokenTTL:            DefaultTokenTTL,
 	}
 	request := ctrl.Request{
 		NamespacedName: client.ObjectKey{
@@ -910,12 +1045,12 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err := getKubeadmConfig(myclient, "worker-join-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cfg.Status.Ready).To(BeTrue())
 	g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
@@ -927,20 +1062,20 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 		},
 	}
 	result, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err = getKubeadmConfig(myclient, "control-plane-join-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cfg.Status.Ready).To(BeTrue())
 	g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
 
 	l := &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(2))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(2))
 
 	// ensure that the token is refreshed...
 	tokenExpires := make([][]byte, len(l.Items))
@@ -966,14 +1101,14 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 		},
 	} {
 		result, err := k.Reconcile(ctx, req)
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(result.RequeueAfter).NotTo(BeNumerically(">=", k.TokenTTL))
 	}
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(2))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(2))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeFalse())
@@ -1008,14 +1143,14 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 		},
 	} {
 		result, err := k.Reconcile(ctx, req)
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(result.RequeueAfter).NotTo(BeNumerically(">=", k.TokenTTL))
 	}
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(2))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(2))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeFalse())
@@ -1058,15 +1193,15 @@ func TestBootstrapTokenTTLExtension(t *testing.T) {
 		},
 	} {
 		result, err := k.Reconcile(ctx, req)
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(result.Requeue).To(BeFalse())
 		g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 	}
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(2))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(2))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeTrue())
@@ -1097,12 +1232,13 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 	}
 
 	objects = append(objects, createSecrets(t, cluster, initConfig)...)
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}, &expv1.MachinePool{}).Build()
 	k := &KubeadmConfigReconciler{
-		Client:             myclient,
-		KubeadmInitLock:    &myInitLocker{},
-		TokenTTL:           DefaultTokenTTL,
-		remoteClientGetter: fakeremote.NewClusterClient,
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+		KubeadmInitLock:     &myInitLocker{},
+		TokenTTL:            DefaultTokenTTL,
 	}
 	request := ctrl.Request{
 		NamespacedName: client.ObjectKey{
@@ -1111,20 +1247,20 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err := getKubeadmConfig(myclient, "workerpool-join-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cfg.Status.Ready).To(BeTrue())
 	g.Expect(cfg.Status.DataSecretName).NotTo(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
 
 	l := &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(1))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(1))
 
 	// ensure that the token is refreshed...
 	tokenExpires := make([][]byte, len(l.Items))
@@ -1144,14 +1280,14 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 		},
 	} {
 		result, err := k.Reconcile(ctx, req)
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(result.RequeueAfter).NotTo(BeNumerically(">=", k.TokenTTL))
 	}
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(1))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(1))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeFalse())
@@ -1173,13 +1309,13 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 		},
 	}
 	result, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.RequeueAfter).NotTo(BeNumerically(">=", k.TokenTTL))
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(1))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(1))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeFalse())
@@ -1205,13 +1341,13 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 		},
 	}
 	result, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(k.TokenTTL / 3))
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(1))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(1))
 
 	for i, item := range l.Items {
 		g.Expect(bytes.Equal(tokenExpires[i], item.Data[bootstrapapi.BootstrapTokenExpirationKey])).To(BeTrue())
@@ -1221,7 +1357,7 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 	tokenExpires[0] = []byte(time.Now().UTC().Add(k.TokenTTL / 5).Format(time.RFC3339))
 	l.Items[0].Data[bootstrapapi.BootstrapTokenExpirationKey] = tokenExpires[0]
 	err = myclient.Update(ctx, &l.Items[0])
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	request = ctrl.Request{
 		NamespacedName: client.ObjectKey{
@@ -1230,13 +1366,13 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 		},
 	}
 	result, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	l = &corev1.SecretList{}
 	err = myclient.List(ctx, l, client.ListOption(client.InNamespace(metav1.NamespaceSystem)))
-	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(len(l.Items)).To(Equal(2))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(l.Items).To(HaveLen(2))
 	foundOld := false
 	foundNew := true
 	for _, item := range l.Items {
@@ -1244,7 +1380,7 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 			foundOld = true
 		} else {
 			expirationTime, err := time.Parse(time.RFC3339, string(item.Data[bootstrapapi.BootstrapTokenExpirationKey]))
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(expirationTime).Should(BeTemporally("~", time.Now().UTC().Add(k.TokenTTL), 10*time.Second))
 			foundNew = true
 		}
@@ -1255,12 +1391,6 @@ func TestBootstrapTokenRotationMachinePool(t *testing.T) {
 
 // Ensure the discovery portion of the JoinConfiguration gets generated correctly.
 func TestKubeadmConfigReconciler_Reconcile_DiscoveryReconcileBehaviors(t *testing.T) {
-	k := &KubeadmConfigReconciler{
-		Client:             fake.NewClientBuilder().Build(),
-		KubeadmInitLock:    &myInitLocker{},
-		remoteClientGetter: fakeremote.NewClusterClient,
-	}
-
 	caHash := []string{"...."}
 	bootstrapToken := bootstrapv1.Discovery{
 		BootstrapToken: &bootstrapv1.BootstrapTokenDiscovery{
@@ -1386,12 +1516,20 @@ func TestKubeadmConfigReconciler_Reconcile_DiscoveryReconcileBehaviors(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
+			fakeClient := fake.NewClientBuilder().Build()
+			k := &KubeadmConfigReconciler{
+				Client:              fakeClient,
+				SecretCachingClient: fakeClient,
+				Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), fakeClient, fakeClient.Scheme(), client.ObjectKey{Name: tc.cluster.Name, Namespace: tc.cluster.Namespace}),
+				KubeadmInitLock:     &myInitLocker{},
+			}
+
 			res, err := k.reconcileDiscovery(ctx, tc.cluster, tc.config, secret.Certificates{})
 			g.Expect(res.IsZero()).To(BeTrue())
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			err = tc.validateDiscovery(g, tc.config)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 		})
 	}
 }
@@ -1433,7 +1571,7 @@ func TestKubeadmConfigReconciler_Reconcile_DiscoveryReconcileFailureBehaviors(t 
 			res, err := k.reconcileDiscovery(ctx, tc.cluster, tc.config, secret.Certificates{})
 			g.Expect(res).To(Equal(tc.result))
 			if tc.err == nil {
-				g.Expect(err).To(BeNil())
+				g.Expect(err).ToNot(HaveOccurred())
 			} else {
 				g.Expect(err).To(Equal(tc.err))
 			}
@@ -1482,7 +1620,7 @@ func TestKubeadmConfigReconciler_Reconcile_DynamicDefaultsForClusterConfiguratio
 			},
 			machine: &clusterv1.Machine{
 				Spec: clusterv1.MachineSpec{
-					Version: pointer.StringPtr("otherVersion"),
+					Version: pointer.String("otherVersion"),
 				},
 			},
 		},
@@ -1508,7 +1646,7 @@ func TestKubeadmConfigReconciler_Reconcile_DynamicDefaultsForClusterConfiguratio
 			},
 			machine: &clusterv1.Machine{
 				Spec: clusterv1.MachineSpec{
-					Version: pointer.StringPtr("myversion"),
+					Version: pointer.String("myversion"),
 				},
 			},
 		},
@@ -1597,24 +1735,25 @@ func TestKubeadmConfigReconciler_Reconcile_AlwaysCheckCAVerificationUnlessReques
 
 			myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 			reconciler := KubeadmConfigReconciler{
-				Client:             myclient,
-				KubeadmInitLock:    &myInitLocker{},
-				remoteClientGetter: fakeremote.NewClusterClient,
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				Tracker:             remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), myclient, myclient.Scheme(), client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}),
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			wc := newWorkerJoinKubeadmConfig(metav1.NamespaceDefault, "worker-join-cfg")
 			wc.Spec.JoinConfiguration.Discovery.BootstrapToken = tc.discovery
 			key := client.ObjectKey{Namespace: wc.Namespace, Name: wc.Name}
 			err := myclient.Create(ctx, wc)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			req := ctrl.Request{NamespacedName: key}
 			_, err = reconciler.Reconcile(ctx, req)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			cfg := &bootstrapv1.KubeadmConfig{}
 			err = myclient.Get(ctx, key, cfg)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(cfg.Spec.JoinConfiguration.Discovery.BootstrapToken.UnsafeSkipCAVerification).To(Equal(tc.skipCAVerification))
 		})
 	}
@@ -1651,9 +1790,10 @@ func TestKubeadmConfigReconciler_ClusterToKubeadmConfigs(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithObjects(objs...).Build()
 	reconciler := &KubeadmConfigReconciler{
-		Client: fakeClient,
+		Client:              fakeClient,
+		SecretCachingClient: fakeClient,
 	}
-	configs := reconciler.ClusterToKubeadmConfigs(cluster)
+	configs := reconciler.ClusterToKubeadmConfigs(ctx, cluster)
 	names := make([]string, 6)
 	for i := range configs {
 		names[i] = configs[i].Name
@@ -1690,14 +1830,15 @@ func TestKubeadmConfigReconciler_Reconcile_DoesNotFailIfCASecretsAlreadyExist(t 
 	}
 	fakec := fake.NewClientBuilder().WithObjects(cluster, m, c, scrt).Build()
 	reconciler := &KubeadmConfigReconciler{
-		Client:          fakec,
-		KubeadmInitLock: &myInitLocker{},
+		Client:              fakec,
+		SecretCachingClient: fakec,
+		KubeadmInitLock:     &myInitLocker{},
 	}
 	req := ctrl.Request{
 		NamespacedName: client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: configName},
 	}
 	_, err := reconciler.Reconcile(ctx, req)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 }
 
 // Exactly one control plane machine initializes if there are multiple control plane machines defined.
@@ -1722,10 +1863,11 @@ func TestKubeadmConfigReconciler_Reconcile_ExactlyOneControlPlaneMachineInitiali
 		controlPlaneInitMachineSecond,
 		controlPlaneInitConfigSecond,
 	}
-	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
+	myclient := fake.NewClientBuilder().WithObjects(objects...).WithStatusSubresource(&bootstrapv1.KubeadmConfig{}).Build()
 	k := &KubeadmConfigReconciler{
-		Client:          myclient,
-		KubeadmInitLock: &myInitLocker{},
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		KubeadmInitLock:     &myInitLocker{},
 	}
 
 	request := ctrl.Request{
@@ -1735,7 +1877,7 @@ func TestKubeadmConfigReconciler_Reconcile_ExactlyOneControlPlaneMachineInitiali
 		},
 	}
 	result, err := k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
@@ -1746,9 +1888,20 @@ func TestKubeadmConfigReconciler_Reconcile_ExactlyOneControlPlaneMachineInitiali
 		},
 	}
 	result, err = k.Reconcile(ctx, request)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(result.Requeue).To(BeFalse())
 	g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+	confList := &bootstrapv1.KubeadmConfigList{}
+	g.Expect(myclient.List(ctx, confList)).To(Succeed())
+	for _, c := range confList.Items {
+		// Ensure the DataSecretName is only set for controlPlaneInitConfigFirst.
+		if c.Name == controlPlaneInitConfigFirst.Name {
+			g.Expect(*c.Status.DataSecretName).To(Not(BeEmpty()))
+		}
+		if c.Name == controlPlaneInitConfigSecond.Name {
+			g.Expect(c.Status.DataSecretName).To(BeNil())
+		}
+	}
 }
 
 // Patch should be applied if there is an error in reconcile.
@@ -1779,8 +1932,9 @@ func TestKubeadmConfigReconciler_Reconcile_PatchWhenErrorOccurred(t *testing.T) 
 
 	myclient := fake.NewClientBuilder().WithObjects(objects...).Build()
 	k := &KubeadmConfigReconciler{
-		Client:          myclient,
-		KubeadmInitLock: &myInitLocker{},
+		Client:              myclient,
+		SecretCachingClient: myclient,
+		KubeadmInitLock:     &myInitLocker{},
 	}
 
 	request := ctrl.Request{
@@ -1796,7 +1950,7 @@ func TestKubeadmConfigReconciler_Reconcile_PatchWhenErrorOccurred(t *testing.T) 
 	g.Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 
 	cfg, err := getKubeadmConfig(myclient, "control-plane-init-cfg", metav1.NamespaceDefault)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	// check if the kubeadm config has been patched
 	g.Expect(cfg.Spec.InitConfiguration).ToNot(BeNil())
 	g.Expect(cfg.Status.ObservedGeneration).NotTo(BeNil())
@@ -1915,8 +2069,9 @@ func TestKubeadmConfigReconciler_ResolveFiles(t *testing.T) {
 
 			myclient := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
 			k := &KubeadmConfigReconciler{
-				Client:          myclient,
-				KubeadmInitLock: &myInitLocker{},
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			// make a list of files we expect to be sourced from secrets
@@ -1931,7 +2086,7 @@ func TestKubeadmConfigReconciler_ResolveFiles(t *testing.T) {
 			}
 
 			files, err := k.resolveFiles(ctx, tc.cfg)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(files).To(Equal(tc.expect))
 			for _, file := range tc.cfg.Spec.Files {
 				if contentFrom[file.Path] {
@@ -2041,8 +2196,9 @@ func TestKubeadmConfigReconciler_ResolveUsers(t *testing.T) {
 
 			myclient := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
 			k := &KubeadmConfigReconciler{
-				Client:          myclient,
-				KubeadmInitLock: &myInitLocker{},
+				Client:              myclient,
+				SecretCachingClient: myclient,
+				KubeadmInitLock:     &myInitLocker{},
 			}
 
 			// make a list of password we expect to be sourced from secrets
@@ -2057,7 +2213,7 @@ func TestKubeadmConfigReconciler_ResolveUsers(t *testing.T) {
 			}
 
 			users, err := k.resolveUsers(ctx, tc.cfg)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(users).To(Equal(tc.expect))
 			for _, user := range tc.cfg.Spec.Users {
 				if passwdFrom[user.Name] {
@@ -2080,13 +2236,13 @@ func newWorkerMachineForCluster(cluster *clusterv1.Cluster) *clusterv1.Machine {
 		Build()
 }
 
-// newControlPlaneMachine returns a Machine with the passed Cluster information and a MachineControlPlaneLabelName.
+// newControlPlaneMachine returns a Machine with the passed Cluster information and a MachineControlPlaneLabel.
 func newControlPlaneMachine(cluster *clusterv1.Cluster, name string) *clusterv1.Machine {
 	m := builder.Machine(cluster.Namespace, name).
 		WithVersion("v1.19.1").
 		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(metav1.NamespaceDefault, "cfg").Unstructured()).
 		WithClusterName(cluster.Name).
-		WithLabels(map[string]string{clusterv1.MachineControlPlaneLabelName: ""}).
+		WithLabels(map[string]string{clusterv1.MachineControlPlaneLabel: ""}).
 		Build()
 	return m
 }
@@ -2095,7 +2251,7 @@ func newControlPlaneMachine(cluster *clusterv1.Cluster, name string) *clusterv1.
 func newMachinePool(cluster *clusterv1.Cluster, name string) *expv1.MachinePool {
 	m := builder.MachinePool(cluster.Namespace, name).
 		WithClusterName(cluster.Name).
-		WithLabels(map[string]string{clusterv1.ClusterLabelName: cluster.Name}).
+		WithLabels(map[string]string{clusterv1.ClusterNameLabel: cluster.Name}).
 		WithBootstrapTemplate(bootstrapbuilder.KubeadmConfig(cluster.Namespace, "conf1").Unstructured()).
 		WithVersion("1.19.1").
 		Build()
@@ -2151,6 +2307,10 @@ func addKubeadmConfigToMachine(config *bootstrapv1.KubeadmConfig, machine *clust
 			Name:       machine.Name,
 			UID:        types.UID(fmt.Sprintf("%s uid", machine.Name)),
 		},
+	}
+
+	if machine.Spec.Bootstrap.ConfigRef == nil {
+		machine.Spec.Bootstrap.ConfigRef = &corev1.ObjectReference{}
 	}
 
 	machine.Spec.Bootstrap.ConfigRef.Name = config.Name

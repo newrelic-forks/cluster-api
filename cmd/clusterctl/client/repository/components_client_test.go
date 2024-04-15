@@ -67,7 +67,7 @@ func Test_componentsClient_Get(t *testing.T) {
 	p1 := config.NewProvider("p1", "", clusterctlv1.BootstrapProviderType)
 
 	configClient, err := config.New("", config.InjectReader(test.NewFakeReader().WithVar(variableName, variableValue)))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	type fields struct {
 		provider   config.Provider
@@ -273,7 +273,7 @@ func Test_componentsClient_Get(t *testing.T) {
 				gs.Expect(err).To(HaveOccurred())
 				return
 			}
-			gs.Expect(err).NotTo(HaveOccurred())
+			gs.Expect(err).ToNot(HaveOccurred())
 
 			gs.Expect(got.Name()).To(Equal(tt.want.provider.Name()))
 			gs.Expect(got.Type()).To(Equal(tt.want.provider.Type()))
@@ -300,7 +300,7 @@ func Test_componentsClient_Get(t *testing.T) {
 			}
 
 			for _, o := range got.Objs() {
-				for _, v := range []string{clusterctlv1.ClusterctlLabelName, clusterv1.ProviderLabelName} {
+				for _, v := range []string{clusterctlv1.ClusterctlLabel, clusterv1.ProviderNameLabel} {
 					gs.Expect(o.GetLabels()).To(HaveKey(v))
 				}
 			}

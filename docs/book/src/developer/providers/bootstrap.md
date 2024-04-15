@@ -10,7 +10,8 @@ A bootstrap provider generates bootstrap data that is used to bootstrap a Kubern
 A bootstrap provider must define an API type for bootstrap resources. The type:
 
 1. Must belong to an API group served by the Kubernetes apiserver
-2. May be implemented as a CustomResourceDefinition, or as part of an aggregated apiserver
+2. Must be implemented as a CustomResourceDefinition.
+    1. The CRD name must have the format produced by `sigs.k8s.io/cluster-api/util/contract.CalculateCRDName(Group, Kind)`.
 3. Must be namespace-scoped
 4. Must have the standard Kubernetes "type metadata" and "object metadata"
 5. Should have a `spec` field containing fields relevant to the bootstrap provider
@@ -51,9 +52,20 @@ type PhippyBootstrapConfigTemplate struct {
 }
 
 type PhippyBootstrapConfigTemplateResource struct {
+<<<<<<< HEAD
+=======
+	// Standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+	// +optional
+	ObjectMeta clusterv1.ObjectMeta `json:"metadata,omitempty"`
+
+>>>>>>> v1.5.7
 	Spec PhippyBootstrapConfigSpec `json:"spec"`
 }
 ```
+
+The CRD name of the template must also have the format produced by `sigs.k8s.io/cluster-api/util/contract.CalculateCRDName(Group, Kind)`.
+
 ### List Resources
 
 For any resource, also add list resources, e.g.
@@ -113,6 +125,13 @@ The following diagram shows the typical logic for a bootstrap provider:
 ## Sentinel File
 
 A bootstrap provider's bootstrap data must create `/run/cluster-api/bootstrap-success.complete` (or `C:\run\cluster-api\bootstrap-success.complete` for Windows machines) upon successful bootstrapping of a Kubernetes node. This allows infrastructure providers to detect and act on bootstrap failures.
+
+## Taint Nodes at creation
+
+A bootstrap provider can optionally taint worker nodes at creation with `node.cluster.x-k8s.io/uninitialized:NoSchedule`.
+This taint is used to prevent workloads to be scheduled on Nodes before the node is initialized by Cluster API.
+As of today the Node initialization consists of syncing labels from Machines to Nodes. Once the labels have been 
+initially synced the taint is removed form the Node.
 
 ## RBAC
 

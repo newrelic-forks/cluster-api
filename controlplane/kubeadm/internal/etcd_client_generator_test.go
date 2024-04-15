@@ -38,7 +38,7 @@ var (
 
 func TestNewEtcdClientGenerator(t *testing.T) {
 	g := NewWithT(t)
-	subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0)
+	subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0, 0)
 	g.Expect(subject.createClient).To(Not(BeNil()))
 }
 
@@ -54,8 +54,8 @@ func TestFirstAvailableNode(t *testing.T) {
 		{
 			name:  "Returns client successfully",
 			nodes: []string{"node-1"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
-				return &etcd.Client{Endpoint: endpoints[0]}, nil
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
+				return &etcd.Client{Endpoint: endpoint}, nil
 			},
 			expectedClient: etcd.Client{Endpoint: "etcd-node-1"},
 		},
@@ -68,7 +68,7 @@ func TestFirstAvailableNode(t *testing.T) {
 		{
 			name:  "Returns error from client",
 			nodes: []string{"node-1", "node-2"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
 				return nil, errors.New("something went wrong")
 			},
 			expectedErr: "could not establish a connection to any etcd node: something went wrong",
@@ -76,12 +76,12 @@ func TestFirstAvailableNode(t *testing.T) {
 		{
 			name:  "Returns client when some of the nodes are down but at least one node is up",
 			nodes: []string{"node-down-1", "node-down-2", "node-up"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
-				if strings.Contains(endpoints[0], "node-down") {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
+				if strings.Contains(endpoint, "node-down") {
 					return nil, errors.New("node down")
 				}
 
-				return &etcd.Client{Endpoint: endpoints[0]}, nil
+				return &etcd.Client{Endpoint: endpoint}, nil
 			},
 			expectedClient: etcd.Client{Endpoint: "etcd-node-up"},
 		},
@@ -90,7 +90,7 @@ func TestFirstAvailableNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0)
+			subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0, 0)
 			subject.createClient = tt.cc
 
 			client, err := subject.forFirstAvailableNode(ctx, tt.nodes)
@@ -117,9 +117,9 @@ func TestForLeader(t *testing.T) {
 		{
 			name:  "Returns client for leader successfully",
 			nodes: []string{"node-1", "node-leader"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
 				return &etcd.Client{
-					Endpoint: endpoints[0],
+					Endpoint: endpoint,
 					LeaderID: 1729,
 					EtcdClient: &etcdfake.FakeEtcdClient{
 						MemberListResponse: &clientv3.MemberListResponse{
@@ -146,12 +146,12 @@ func TestForLeader(t *testing.T) {
 		{
 			name:  "Returns client for leader even when one or more nodes are down",
 			nodes: []string{"node-down-1", "node-down-2", "node-leader"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
-				if strings.Contains(endpoints[0], "node-down") {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
+				if strings.Contains(endpoint, "node-down") {
 					return nil, errors.New("node down")
 				}
 				return &etcd.Client{
-					Endpoint: endpoints[0],
+					Endpoint: endpoint,
 					LeaderID: 1729,
 					EtcdClient: &etcdfake.FakeEtcdClient{
 						MemberListResponse: &clientv3.MemberListResponse{
@@ -182,9 +182,9 @@ func TestForLeader(t *testing.T) {
 		{
 			name:  "Returns error when the leader does not have a corresponding node",
 			nodes: []string{"node-1"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
 				return &etcd.Client{
-					Endpoint: endpoints[0],
+					Endpoint: endpoint,
 					LeaderID: 1729,
 					EtcdClient: &etcdfake.FakeEtcdClient{
 						MemberListResponse: &clientv3.MemberListResponse{
@@ -201,7 +201,7 @@ func TestForLeader(t *testing.T) {
 		{
 			name:  "Returns error when all nodes are down",
 			nodes: []string{"node-down-1", "node-down-2", "node-down-3"},
-			cc: func(ctx context.Context, endpoints []string) (*etcd.Client, error) {
+			cc: func(ctx context.Context, endpoint string) (*etcd.Client, error) {
 				return nil, errors.New("node down")
 			},
 			expectedErr: "could not establish a connection to the etcd leader: [could not establish a connection to any etcd node: node down, failed to connect to etcd node]",
@@ -212,7 +212,7 @@ func TestForLeader(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0)
+			subject = NewEtcdClientGenerator(&rest.Config{}, &tls.Config{MinVersion: tls.VersionTLS12}, 0, 0)
 			subject.createClient = tt.cc
 
 			client, err := subject.forLeader(ctx, tt.nodes)

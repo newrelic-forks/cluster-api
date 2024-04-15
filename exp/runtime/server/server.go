@@ -19,6 +19,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,15 +38,13 @@ import (
 	runtimehooksv1 "sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1"
 )
 
-const tlsVersion13 = "1.3"
-
 // DefaultPort is the default port that the webhook server serves.
 var DefaultPort = 9443
 
 // Server is a runtime webhook server.
 type Server struct {
 	catalog  *runtimecatalog.Catalog
-	server   *webhook.Server
+	server   webhook.Server
 	handlers map[string]ExtensionHandler
 }
 
@@ -70,8 +69,8 @@ type Options struct {
 	CertDir string
 }
 
-// NewServer creates a new runtime webhook server based on the given Options.
-func NewServer(options Options) (*Server, error) {
+// New creates a new runtime webhook server based on the given Options.
+func New(options Options) (*Server, error) {
 	if options.Catalog == nil {
 		return nil, errors.Errorf("catalog is required")
 	}
@@ -82,15 +81,21 @@ func NewServer(options Options) (*Server, error) {
 		options.CertDir = filepath.Join(os.TempDir(), "k8s-webhook-server", "serving-certs")
 	}
 
-	webhookServer := &webhook.Server{
-		Port:          options.Port,
-		Host:          options.Host,
-		CertDir:       options.CertDir,
-		CertName:      "tls.crt",
-		KeyName:       "tls.key",
-		WebhookMux:    http.NewServeMux(),
-		TLSMinVersion: tlsVersion13,
-	}
+	webhookServer := webhook.NewServer(
+		webhook.Options{
+			Port:       options.Port,
+			Host:       options.Host,
+			CertDir:    options.CertDir,
+			CertName:   "tls.crt",
+			KeyName:    "tls.key",
+			WebhookMux: http.NewServeMux(),
+			TLSOpts: []func(*tls.Config){
+				func(cfg *tls.Config) {
+					cfg.MinVersion = tls.VersionTLS13
+				},
+			},
+		},
+	)
 
 	return &Server{
 		catalog:  options.Catalog,
@@ -112,15 +117,20 @@ type ExtensionHandler struct {
 	Hook runtimecatalog.Hook
 
 	// Name is the name of the extension handler.
+	// An extension handler name must be valid in line RFC 1123 Label Names.
 	Name string
 
 	// HandlerFunc is the handler function.
 	HandlerFunc runtimecatalog.Hook
 
 	// TimeoutSeconds is the timeout of the extension handler.
+	// If left undefined, this will be defaulted to 10s when processing the answer to the discovery
+	// call for this server.
 	TimeoutSeconds *int32
 
-	// FailurePolicy is the failure policy of the extension handler
+	// FailurePolicy is the failure policy of the extension handler.
+	// If left undefined, this will be defaulted to FailurePolicyFail when processing the answer to the discovery
+	// call for this server.
 	FailurePolicy *runtimehooksv1.FailurePolicy
 }
 
@@ -175,8 +185,8 @@ func (s *Server) validateHandler(handler ExtensionHandler) error {
 	}
 
 	// Get hook and handler request and response types.
-	hookRequestType := hookFuncType.In(0)  //nolint:ifshort
-	hookResponseType := hookFuncType.In(1) //nolint:ifshort
+	hookRequestType := hookFuncType.In(0)
+	hookResponseType := hookFuncType.In(1)
 	handlerContextType := handlerFuncType.In(0)
 	handlerRequestType := handlerFuncType.In(1)
 	handlerResponseType := handlerFuncType.In(2)
@@ -225,7 +235,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.server.Register(handlerPath, http.HandlerFunc(wrappedHandler))
 	}
 
-	return s.server.StartStandalone(ctx, nil)
+	return s.server.Start(ctx)
 }
 
 // discoveryHandler generates a discovery handler based on a list of handlers.

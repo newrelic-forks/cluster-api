@@ -22,6 +22,12 @@ import (
 	runtimecatalog "sigs.k8s.io/cluster-api/exp/runtime/catalog"
 )
 
+<<<<<<< HEAD
+=======
+// DefaultHandlersTimeoutSeconds defines the default timeout duration for client calls to ExtensionHandlers.
+const DefaultHandlersTimeoutSeconds = 10
+
+>>>>>>> v1.5.7
 // DiscoveryRequest is the request of the Discovery hook.
 // +kubebuilder:object:root=true
 type DiscoveryRequest struct {
@@ -97,7 +103,11 @@ func init() {
 			"Runtime Extension implementers must use this hook to inform the Cluster API runtime about all the handlers " +
 			"that are defined in an external component implementing Runtime Extensions.\n" +
 			"\n" +
+<<<<<<< HEAD
 			"Notes:\n" +
+=======
+			"Notes:\n" + //nolint:goconst
+>>>>>>> v1.5.7
 			"- When using Runtime SDK utils, a handler for this hook is automatically generated",
 		Singleton: true,
 	})

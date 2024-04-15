@@ -199,6 +199,7 @@ func (m *MachinePoolStatus) GetTypedPhase() MachinePoolPhase {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:deprecatedversion
 // +kubebuilder:resource:path=machinepools,shortName=mp,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas
@@ -209,6 +210,8 @@ func (m *MachinePoolStatus) GetTypedPhase() MachinePoolPhase {
 // +k8s:conversion-gen=false
 
 // MachinePool is the Schema for the machinepools API.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type MachinePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -230,6 +233,8 @@ func (m *MachinePool) SetConditions(conditions clusterv1alpha4.Conditions) {
 // +kubebuilder:object:root=true
 
 // MachinePoolList contains a list of MachinePool.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type MachinePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -202,13 +202,13 @@ func TestClient_httpCall(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 		})
 	}
 }
 
-func fakeHookHandler(w http.ResponseWriter, r *http.Request) {
+func fakeHookHandler(w http.ResponseWriter, _ *http.Request) {
 	response := &fakev1alpha1.FakeResponse{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "FakeHookResponse",
@@ -325,7 +325,7 @@ func TestURLForExtension(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(u.Scheme).To(Equal(tt.want.scheme))
 				g.Expect(u.Host).To(Equal(tt.want.host))
 				g.Expect(u.Path).To(Equal(tt.want.path))
@@ -362,7 +362,7 @@ func Test_defaultAndValidateDiscoveryResponse(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "error with name violating DNS1123",
+			name: "error if handler name has capital letters",
 			discovery: &runtimehooksv1.DiscoveryResponse{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "DiscoveryResponse",
@@ -370,6 +370,23 @@ func Test_defaultAndValidateDiscoveryResponse(t *testing.T) {
 				},
 				Handlers: []runtimehooksv1.ExtensionHandler{{
 					Name: "HAS-CAPITAL-LETTERS",
+					RequestHook: runtimehooksv1.GroupVersionHook{
+						Hook:       "FakeHook",
+						APIVersion: fakev1alpha1.GroupVersion.String(),
+					},
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "error if handler name has full stops",
+			discovery: &runtimehooksv1.DiscoveryResponse{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "DiscoveryResponse",
+					APIVersion: runtimehooksv1.GroupVersion.String(),
+				},
+				Handlers: []runtimehooksv1.ExtensionHandler{{
+					Name: "has.full.stops",
 					RequestHook: runtimehooksv1.GroupVersionHook{
 						Hook:       "FakeHook",
 						APIVersion: fakev1alpha1.GroupVersion.String(),
@@ -542,7 +559,7 @@ func TestClient_CallExtension(t *testing.T) {
 						APIVersion: fakev1alpha1.GroupVersion.String(),
 						Hook:       "FakeHook",
 					},
-					TimeoutSeconds: pointer.Int32Ptr(1),
+					TimeoutSeconds: pointer.Int32(1),
 					FailurePolicy:  &fpFail,
 				},
 			},
@@ -564,7 +581,7 @@ func TestClient_CallExtension(t *testing.T) {
 						APIVersion: fakev1alpha1.GroupVersion.String(),
 						Hook:       "FakeHook",
 					},
-					TimeoutSeconds: pointer.Int32Ptr(1),
+					TimeoutSeconds: pointer.Int32(1),
 					FailurePolicy:  &fpIgnore,
 				},
 			},
@@ -573,7 +590,7 @@ func TestClient_CallExtension(t *testing.T) {
 	type args struct {
 		hook     runtimecatalog.Hook
 		name     string
-		request  runtime.Object
+		request  runtimehooksv1.RequestObject
 		response runtimehooksv1.ResponseObject
 	}
 	tests := []struct {
@@ -636,7 +653,8 @@ func TestClient_CallExtension(t *testing.T) {
 				responses: map[string]testServerResponse{
 					"/*": response(runtimehooksv1.ResponseStatusSuccess),
 				},
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -652,7 +670,8 @@ func TestClient_CallExtension(t *testing.T) {
 				responses: map[string]testServerResponse{
 					"/*": response(runtimehooksv1.ResponseStatusSuccess),
 				},
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -668,7 +687,8 @@ func TestClient_CallExtension(t *testing.T) {
 				responses: map[string]testServerResponse{
 					"/*": response(runtimehooksv1.ResponseStatusFailure),
 				},
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -684,7 +704,8 @@ func TestClient_CallExtension(t *testing.T) {
 				responses: map[string]testServerResponse{
 					"/*": response(runtimehooksv1.ResponseStatusFailure),
 				},
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -698,7 +719,8 @@ func TestClient_CallExtension(t *testing.T) {
 			registeredExtensionConfigs: []runtimev1.ExtensionConfig{validExtensionHandlerWithIgnorePolicy},
 			testServer: testServerConfig{
 				start: false,
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -711,7 +733,8 @@ func TestClient_CallExtension(t *testing.T) {
 			registeredExtensionConfigs: []runtimev1.ExtensionConfig{validExtensionHandlerWithFailPolicy},
 			testServer: testServerConfig{
 				start: false,
-			}, args: args{
+			},
+			args: args{
 				hook:     fakev1alpha1.FakeHook,
 				name:     "valid-extension",
 				request:  &fakev1alpha1.FakeRequest{},
@@ -760,10 +783,89 @@ func TestClient_CallExtension(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 		})
 	}
+}
+
+func TestPrepareRequest(t *testing.T) {
+	t.Run("request should have the correct settings", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			request      runtimehooksv1.RequestObject
+			registration *runtimeregistry.ExtensionRegistration
+			want         map[string]string
+		}{
+			{
+				name: "settings in request should be preserved as is if there are not setting in the registration",
+				request: &runtimehooksv1.BeforeClusterCreateRequest{
+					CommonRequest: runtimehooksv1.CommonRequest{
+						Settings: map[string]string{
+							"key1": "value1",
+						},
+					},
+				},
+				registration: &runtimeregistry.ExtensionRegistration{},
+				want: map[string]string{
+					"key1": "value1",
+				},
+			},
+			{
+				name: "settings in registration should be used as is if there are no settings in the request",
+				request: &runtimehooksv1.BeforeClusterCreateRequest{
+					CommonRequest: runtimehooksv1.CommonRequest{},
+				},
+				registration: &runtimeregistry.ExtensionRegistration{
+					Settings: map[string]string{
+						"key1": "value1",
+					},
+				},
+				want: map[string]string{
+					"key1": "value1",
+				},
+			},
+			{
+				name: "settings in request and registry should be merged with request taking precedence",
+				request: &runtimehooksv1.BeforeClusterCreateRequest{
+					CommonRequest: runtimehooksv1.CommonRequest{
+						Settings: map[string]string{
+							"key1": "value1",
+							"key2": "value2",
+						},
+					},
+				},
+				registration: &runtimeregistry.ExtensionRegistration{
+					Settings: map[string]string{
+						"key1": "value11",
+						"key3": "value3",
+					},
+				},
+				want: map[string]string{
+					"key1": "value1",
+					"key2": "value2",
+					"key3": "value3",
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				g := NewWithT(t)
+				var originalRegistrationSettings map[string]string
+				if tt.registration.Settings != nil {
+					originalRegistrationSettings = map[string]string{}
+					for k, v := range tt.registration.Settings {
+						originalRegistrationSettings[k] = v
+					}
+				}
+
+				g.Expect(cloneAndAddSettings(tt.request, tt.registration.Settings).GetSettings()).To(Equal(tt.want))
+				// Make sure that the original settings in the registration are not modified.
+				g.Expect(tt.registration.Settings).To(Equal(originalRegistrationSettings))
+			})
+		}
+	})
 }
 
 func TestClient_CallAllExtensions(t *testing.T) {
@@ -795,7 +897,7 @@ func TestClient_CallAllExtensions(t *testing.T) {
 						APIVersion: fakev1alpha1.GroupVersion.String(),
 						Hook:       "FakeHook",
 					},
-					TimeoutSeconds: pointer.Int32Ptr(1),
+					TimeoutSeconds: pointer.Int32(1),
 					FailurePolicy:  &fpFail,
 				},
 				{
@@ -804,7 +906,7 @@ func TestClient_CallAllExtensions(t *testing.T) {
 						APIVersion: fakev1alpha1.GroupVersion.String(),
 						Hook:       "FakeHook",
 					},
-					TimeoutSeconds: pointer.Int32Ptr(1),
+					TimeoutSeconds: pointer.Int32(1),
 					FailurePolicy:  &fpFail,
 				},
 				{
@@ -813,7 +915,7 @@ func TestClient_CallAllExtensions(t *testing.T) {
 						APIVersion: fakev1alpha1.GroupVersion.String(),
 						Hook:       "FakeHook",
 					},
-					TimeoutSeconds: pointer.Int32Ptr(1),
+					TimeoutSeconds: pointer.Int32(1),
 					FailurePolicy:  &fpFail,
 				},
 			},
@@ -822,7 +924,7 @@ func TestClient_CallAllExtensions(t *testing.T) {
 
 	type args struct {
 		hook     runtimecatalog.Hook
-		request  runtime.Object
+		request  runtimehooksv1.RequestObject
 		response runtimehooksv1.ResponseObject
 	}
 	tests := []struct {
@@ -965,7 +1067,7 @@ func TestClient_CallAllExtensions(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 		})
 	}
@@ -1006,7 +1108,7 @@ func Test_client_matchNamespace(t *testing.T) {
 			},
 		},
 	})
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	notMatchingMatchExpressions, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{
 			{
@@ -1016,7 +1118,7 @@ func Test_client_matchNamespace(t *testing.T) {
 			},
 		},
 	})
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	tests := []struct {
 		name               string
 		selector           labels.Selector
@@ -1094,31 +1196,31 @@ func Test_aggregateResponses(t *testing.T) {
 	}{
 		{
 			name:              "Aggregate response if there is only one response",
-			aggregateResponse: fakeSuccessResponse(),
+			aggregateResponse: fakeSuccessResponse(""),
 			responses: []runtimehooksv1.ResponseObject{
-				fakeSuccessResponse(),
+				fakeSuccessResponse("test"),
 			},
-			want: fakeSuccessResponse(),
+			want: fakeSuccessResponse("test"),
 		},
 		{
 			name:              "Aggregate retry response if there is only one response",
-			aggregateResponse: fakeRetryableSuccessResponse(0),
+			aggregateResponse: fakeRetryableSuccessResponse(0, ""),
 			responses: []runtimehooksv1.ResponseObject{
-				fakeRetryableSuccessResponse(5),
+				fakeRetryableSuccessResponse(5, "test"),
 			},
-			want: fakeRetryableSuccessResponse(5),
+			want: fakeRetryableSuccessResponse(5, "test"),
 		},
 		{
 			name:              "Aggregate retry responses to lowest non-zero retryAfterSeconds value",
-			aggregateResponse: fakeRetryableSuccessResponse(0),
+			aggregateResponse: fakeRetryableSuccessResponse(0, ""),
 			responses: []runtimehooksv1.ResponseObject{
-				fakeRetryableSuccessResponse(0),
-				fakeRetryableSuccessResponse(1),
-				fakeRetryableSuccessResponse(5),
-				fakeRetryableSuccessResponse(4),
-				fakeRetryableSuccessResponse(3),
+				fakeRetryableSuccessResponse(0, "test1"),
+				fakeRetryableSuccessResponse(1, "test2"),
+				fakeRetryableSuccessResponse(5, ""),
+				fakeRetryableSuccessResponse(4, ""),
+				fakeRetryableSuccessResponse(3, ""),
 			},
-			want: fakeRetryableSuccessResponse(1),
+			want: fakeRetryableSuccessResponse(1, "test1, test2"),
 		},
 	}
 	for _, tt := range tests {
@@ -1191,27 +1293,27 @@ func registry(configs []runtimev1.ExtensionConfig) runtimeregistry.ExtensionRegi
 	return registry
 }
 
-func fakeSuccessResponse() *fakev1alpha1.FakeResponse {
+func fakeSuccessResponse(message string) *fakev1alpha1.FakeResponse {
 	return &fakev1alpha1.FakeResponse{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "FakeResponse",
 			APIVersion: "v1alpha1",
 		},
 		CommonResponse: runtimehooksv1.CommonResponse{
-			Message: "",
+			Message: message,
 			Status:  runtimehooksv1.ResponseStatusSuccess,
 		},
 	}
 }
 
-func fakeRetryableSuccessResponse(retryAfterSeconds int32) *fakev1alpha1.RetryableFakeResponse {
+func fakeRetryableSuccessResponse(retryAfterSeconds int32, message string) *fakev1alpha1.RetryableFakeResponse {
 	return &fakev1alpha1.RetryableFakeResponse{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "FakeResponse",
 			APIVersion: "v1alpha1",
 		},
 		CommonResponse: runtimehooksv1.CommonResponse{
-			Message: "",
+			Message: message,
 			Status:  runtimehooksv1.ResponseStatusSuccess,
 		},
 		CommonRetryResponse: runtimehooksv1.CommonRetryResponse{
@@ -1231,4 +1333,72 @@ func newUnstartedTLSServer(handler http.Handler) *httptest.Server {
 		Certificates: []tls.Certificate{cert},
 	}
 	return srv
+}
+
+func TestNameForHandler(t *testing.T) {
+	tests := []struct {
+		name            string
+		handler         runtimehooksv1.ExtensionHandler
+		extensionConfig *runtimev1.ExtensionConfig
+		want            string
+		wantErr         bool
+	}{
+		{
+			name:            "return well formatted name",
+			handler:         runtimehooksv1.ExtensionHandler{Name: "discover-variables"},
+			extensionConfig: &runtimev1.ExtensionConfig{ObjectMeta: metav1.ObjectMeta{Name: "runtime1"}},
+			want:            "discover-variables.runtime1",
+		},
+		{
+			name:            "return well formatted name",
+			handler:         runtimehooksv1.ExtensionHandler{Name: "discover-variables"},
+			extensionConfig: nil,
+			wantErr:         true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NameForHandler(tt.handler, tt.extensionConfig)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NameForHandler() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("NameForHandler() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtensionNameFromHandlerName(t *testing.T) {
+	tests := []struct {
+		name                  string
+		registeredHandlerName string
+		want                  string
+		wantErr               bool
+	}{
+		{
+			name:                  "Get name from correctly formatted handler name",
+			registeredHandlerName: "discover-variables.runtime1",
+			want:                  "runtime1",
+		},
+		{
+			name: "error from incorrectly formatted handler name",
+			// Two periods make this name badly formed.
+			registeredHandlerName: "discover-variables.runtime.1",
+			wantErr:               true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExtensionNameFromHandlerName(tt.registeredHandlerName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ExtensionNameFromHandlerName() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ExtensionNameFromHandlerName() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

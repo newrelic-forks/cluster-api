@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
+	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/test/infrastructure/container"
 	dockercontrollers "sigs.k8s.io/cluster-api/test/infrastructure/docker/internal/controllers"
 )
@@ -35,6 +36,10 @@ import (
 type DockerMachineReconciler struct {
 	Client           client.Client
 	ContainerRuntime container.Runtime
+	Tracker          *remote.ClusterCacheTracker
+
+	// WatchFilterValue is the label value used to filter events prior to reconciliation.
+	WatchFilterValue string
 }
 
 // SetupWithManager sets up the reconciler with the Manager.
@@ -42,6 +47,8 @@ func (r *DockerMachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 	return (&dockercontrollers.DockerMachineReconciler{
 		Client:           r.Client,
 		ContainerRuntime: r.ContainerRuntime,
+		Tracker:          r.Tracker,
+		WatchFilterValue: r.WatchFilterValue,
 	}).SetupWithManager(ctx, mgr, options)
 }
 
@@ -49,6 +56,9 @@ func (r *DockerMachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 type DockerClusterReconciler struct {
 	Client           client.Client
 	ContainerRuntime container.Runtime
+
+	// WatchFilterValue is the label value used to filter events prior to reconciliation.
+	WatchFilterValue string
 }
 
 // SetupWithManager sets up the reconciler with the Manager.
@@ -56,5 +66,6 @@ func (r *DockerClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 	return (&dockercontrollers.DockerClusterReconciler{
 		Client:           r.Client,
 		ContainerRuntime: r.ContainerRuntime,
+		WatchFilterValue: r.WatchFilterValue,
 	}).SetupWithManager(ctx, mgr, options)
 }

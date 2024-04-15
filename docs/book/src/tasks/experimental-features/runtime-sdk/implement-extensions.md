@@ -46,8 +46,13 @@ import (
 	"github.com/spf13/pflag"
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
+<<<<<<< HEAD
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
+=======
+	logsv1 "k8s.io/component-base/logs/api/v1"
+	"k8s.io/klog/v2"
+>>>>>>> v1.5.7
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	runtimecatalog "sigs.k8s.io/cluster-api/exp/runtime/catalog"
@@ -56,8 +61,13 @@ import (
 )
 
 var (
+<<<<<<< HEAD
 	catalog  = runtimecatalog.New()
 	setupLog = ctrl.Log.WithName("setup")
+=======
+	// catalog contains all information about RuntimeHooks.
+	catalog = runtimecatalog.New()
+>>>>>>> v1.5.7
 
 	// Flags.
 	profilerAddress string
@@ -67,15 +77,26 @@ var (
 )
 
 func init() {
+<<<<<<< HEAD
 	// Register the Runtime Hook types into the catalog.
+=======
+	// Adds to the catalog all the RuntimeHooks defined in cluster API.
+>>>>>>> v1.5.7
 	_ = runtimehooksv1.AddToCatalog(catalog)
 }
 
 // InitFlags initializes the flags.
 func InitFlags(fs *pflag.FlagSet) {
+<<<<<<< HEAD
 	logs.AddFlags(fs, logs.SkipLoggingConfigurationFlags())
 	logOptions.AddFlags(fs)
 
+=======
+	// Initialize logs flags using Kubernetes component-base machinery.
+	logsv1.AddFlags(logOptions, fs)
+
+	// Add test-extension specific flags
+>>>>>>> v1.5.7
 	fs.StringVar(&profilerAddress, "profiler-address", "",
 		"Bind address to expose the pprof profiler (e.g. localhost:6060)")
 
@@ -87,19 +108,38 @@ func InitFlags(fs *pflag.FlagSet) {
 }
 
 func main() {
+<<<<<<< HEAD
+=======
+	// Creates a logger to be used during the main func.
+	setupLog := ctrl.Log.WithName("main")
+
+	// Initialize and parse command line flags.
+>>>>>>> v1.5.7
 	InitFlags(pflag.CommandLine)
 	pflag.CommandLine.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
+<<<<<<< HEAD
 	if err := logOptions.ValidateAndApply(nil); err != nil {
+=======
+	// Validates logs flags using Kubernetes component-base machinery and applies them
+	if err := logsv1.ValidateAndApply(logOptions, nil); err != nil {
+>>>>>>> v1.5.7
 		setupLog.Error(err, "unable to start extension")
 		os.Exit(1)
 	}
 
+<<<<<<< HEAD
 	// klog.Background will automatically use the right logger.
 	ctrl.SetLogger(klog.Background())
 
+=======
+	// Add the klog logger in the context.
+	ctrl.SetLogger(klog.Background())
+
+	// Initialize the golang profiler server, if required.
+>>>>>>> v1.5.7
 	if profilerAddress != "" {
 		klog.Infof("Profiler listening for requests at %s", profilerAddress)
 		go func() {
@@ -107,9 +147,14 @@ func main() {
 		}()
 	}
 
+<<<<<<< HEAD
 	ctx := ctrl.SetupSignalHandler()
 
 	webhookServer, err := server.NewServer(server.Options{
+=======
+	// Create a http server for serving runtime extensions
+	webhookServer, err := server.New(server.Options{
+>>>>>>> v1.5.7
 		Catalog: catalog,
 		Port:    webhookPort,
 		CertDir: webhookCertDir,
@@ -121,26 +166,45 @@ func main() {
 
 	// Register extension handlers.
 	if err := webhookServer.AddExtensionHandler(server.ExtensionHandler{
+<<<<<<< HEAD
 		Hook:           runtimehooksv1.BeforeClusterCreate,
 		Name:           "before-cluster-create",
 		HandlerFunc:    DoBeforeClusterCreate,
 		TimeoutSeconds: pointer.Int32(5),
 		FailurePolicy:  toPtr(runtimehooksv1.FailurePolicyFail),
+=======
+		Hook:        runtimehooksv1.BeforeClusterCreate,
+		Name:        "before-cluster-create",
+		HandlerFunc: DoBeforeClusterCreate,
+>>>>>>> v1.5.7
 	}); err != nil {
 		setupLog.Error(err, "error adding handler")
 		os.Exit(1)
 	}
 	if err := webhookServer.AddExtensionHandler(server.ExtensionHandler{
+<<<<<<< HEAD
 		Hook:           runtimehooksv1.BeforeClusterUpgrade,
 		Name:           "before-cluster-upgrade",
 		HandlerFunc:    DoBeforeClusterUpgrade,
 		TimeoutSeconds: pointer.Int32(5),
 		FailurePolicy:  toPtr(runtimehooksv1.FailurePolicyFail),
+=======
+		Hook:        runtimehooksv1.BeforeClusterUpgrade,
+		Name:        "before-cluster-upgrade",
+		HandlerFunc: DoBeforeClusterUpgrade,
+>>>>>>> v1.5.7
 	}); err != nil {
 		setupLog.Error(err, "error adding handler")
 		os.Exit(1)
 	}
 
+<<<<<<< HEAD
+=======
+	// Setup a context listening for SIGINT.
+	ctx := ctrl.SetupSignalHandler()
+
+	// Start the https server.
+>>>>>>> v1.5.7
 	setupLog.Info("Starting Runtime Extension server")
 	if err := webhookServer.Start(ctx); err != nil {
 		setupLog.Error(err, "error running webhook server")
@@ -159,10 +223,13 @@ func DoBeforeClusterUpgrade(ctx context.Context, request *runtimehooksv1.BeforeC
 	log.Info("BeforeClusterUpgrade is called")
 	// Your implementation
 }
+<<<<<<< HEAD
 
 func toPtr(f runtimehooksv1.FailurePolicy) *runtimehooksv1.FailurePolicy {
 	return &f
 }
+=======
+>>>>>>> v1.5.7
 ```
 
 For a full example see our [test extension](https://github.com/kubernetes-sigs/cluster-api/tree/main/test/extension).
@@ -212,7 +279,11 @@ synchronously.
 ### Availability
 
 Runtime Extension failure could result in errors in handling the workload clusters lifecycle, and so the implementation
+<<<<<<< HEAD
 should be robust, have proper error handling, avoid panics, etc.. . Failure policies can be set up to mitigate the
+=======
+should be robust, have proper error handling, avoid panics, etc. Failure policies can be set up to mitigate the
+>>>>>>> v1.5.7
 negative impact of a Runtime Extension on the Cluster API Runtime, but this option can’t be used in all cases
 (see [Error Management](#error-management)).
 
@@ -270,7 +341,68 @@ Some Runtime Hooks, e.g. like external patches, might explicitly request for cor
 to support this property. But we encourage developers to follow this pattern more generally given that it fits
 well with practices like unit testing and generally makes the entire system more predictable and easier to troubleshoot.
 
+<<<<<<< HEAD
 ### Error Management
+=======
+### Error messages
+
+RuntimeExtension authors should be aware that error messages are surfaced as a conditions in Kubernetes resources 
+and recorded in Cluster API controller's logs. As a consequence:
+
+- Error message must not contain any sensitive information.
+- Error message must be deterministic, and must avoid to including timestamps or values changing at every call.
+- Error message must not contain external errors when it's not clear if those errors are deterministic (e.g. errors return from cloud APIs).
+
+<aside class="note warning">
+
+<h1>Caution</h1>
+
+If an error message is not deterministic and it changes at every call even if the problem is the same, it could
+lead to to Kubernetes resources conditions continuously changing, and this generates a denial attack to 
+controllers processing those resource that might impact system stability.
+
+</aside>
+
+### ExtensionConfig
+
+To register your runtime extension apply the ExtensionConfig resource in the management cluster, including your CA 
+certs, ClusterIP service associated with the app and namespace, and the target namespace for the given extension. Once 
+created, the extension will detect the associated service and discover the associated Hooks. For clarification, you can 
+check the status of the ExtensionConfig. Below is an example of `ExtensionConfig` -
+
+```yaml
+apiVersion: runtime.cluster.x-k8s.io/v1alpha1
+kind: ExtensionConfig
+metadata:
+  annotations:
+    runtime.cluster.x-k8s.io/inject-ca-from-secret: default/test-runtime-sdk-svc-cert
+  name: test-runtime-sdk-extensionconfig
+spec:
+  clientConfig:
+    service:
+      name: test-runtime-sdk-svc
+      namespace: default # Note: this assumes the test extension get deployed in the default namespace
+      port: 443
+  namespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - default # Note: this assumes the test extension is used by Cluster in the default namespace only
+```
+
+### Settings
+
+Settings can be added to the ExtensionConfig object in the form of a map with string keys and values. These settings are
+sent with each request to hooks registered by that ExtensionConfig. Extension developers can implement behavior in their
+extensions to alter behavior based on these settings. Settings should be well documented by extension developers so that 
+ClusterClass authors can understand usage and expected behaviour.
+
+Settings can be provided for individual external patches by providing them in the ClusterClass `.spec.patches[*].external.settings`.
+This can be used to overwrite settings at the ExtensionConfig level for that patch.
+
+### Error management
+>>>>>>> v1.5.7
 
 In case a Runtime Extension returns an error, the error will be handled according to the corresponding failure policy
 defined in the response of the Discovery call.

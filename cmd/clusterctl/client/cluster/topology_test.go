@@ -281,16 +281,16 @@ func Test_topologyClient_Plan(t *testing.T) {
 				return
 			}
 			// The plan should function should not return any error.
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			// Check affected ClusterClasses.
-			g.Expect(len(res.ClusterClasses)).To(Equal(len(tt.want.affectedClusterClasses)))
+			g.Expect(res.ClusterClasses).To(HaveLen(len(tt.want.affectedClusterClasses)))
 			for _, cc := range tt.want.affectedClusterClasses {
 				g.Expect(res.ClusterClasses).To(ContainElement(cc))
 			}
 
 			// Check affected Clusters.
-			g.Expect(len(res.Clusters)).To(Equal(len(tt.want.affectedClusters)))
+			g.Expect(res.Clusters).To(HaveLen(len(tt.want.affectedClusters)))
 			for _, cluster := range tt.want.affectedClusters {
 				g.Expect(res.Clusters).To(ContainElement(cluster))
 			}
@@ -349,11 +349,11 @@ func (m *topologyPlanOutputItemMatcher) Match(actual interface{}) (bool, error) 
 	return true, nil
 }
 
-func (m *topologyPlanOutputItemMatcher) FailureMessage(actual interface{}) string {
+func (m *topologyPlanOutputItemMatcher) FailureMessage(_ interface{}) string {
 	return fmt.Sprintf("Expected item Kind=%s, Namespace=%s, Name(prefix)=%s to be present", m.kind, m.namespace, m.namePrefix)
 }
 
-func (m *topologyPlanOutputItemMatcher) NegatedFailureMessage(actual interface{}) string {
+func (m *topologyPlanOutputItemMatcher) NegatedFailureMessage(_ interface{}) string {
 	return fmt.Sprintf("Expected item Kind=%s, Namespace=%s, Name(prefix)=%s not to be present", m.kind, m.namespace, m.namePrefix)
 }
 

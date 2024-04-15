@@ -37,6 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -45,6 +46,8 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	kubeadmtypes "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/proxy"
+	"sigs.k8s.io/cluster-api/internal/util/kubeadm"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/certs"
 	containerutil "sigs.k8s.io/cluster-api/util/container"
@@ -53,14 +56,15 @@ import (
 )
 
 const (
-	kubeProxyKey                 = "kube-proxy"
-	kubeadmConfigKey             = "kubeadm-config"
-	kubeletConfigKey             = "kubelet"
-	cgroupDriverKey              = "cgroupDriver"
-	labelNodeRoleOldControlPlane = "node-role.kubernetes.io/master" // Deprecated: https://github.com/kubernetes/kubeadm/issues/2200
-	labelNodeRoleControlPlane    = "node-role.kubernetes.io/control-plane"
-	clusterStatusKey             = "ClusterStatus"
-	clusterConfigurationKey      = "ClusterConfiguration"
+	kubeProxyKey                   = "kube-proxy"
+	kubeadmConfigKey               = "kubeadm-config"
+	kubeadmAPIServerCertCommonName = "kube-apiserver"
+	kubeletConfigKey               = "kubelet"
+	cgroupDriverKey                = "cgroupDriver"
+	labelNodeRoleOldControlPlane   = "node-role.kubernetes.io/master" // Deprecated: https://github.com/kubernetes/kubeadm/issues/2200
+	labelNodeRoleControlPlane      = "node-role.kubernetes.io/control-plane"
+	clusterStatusKey               = "ClusterStatus"
+	clusterConfigurationKey        = "ClusterConfiguration"
 )
 
 var (
@@ -104,6 +108,7 @@ type WorkloadCluster interface {
 	UpdateStaticPodConditions(ctx context.Context, controlPlane *ControlPlane)
 	UpdateEtcdConditions(ctx context.Context, controlPlane *ControlPlane)
 	EtcdMembers(ctx context.Context) ([]string, error)
+	GetAPIServerCertificateExpiry(ctx context.Context, kubeadmConfig *bootstrapv1.KubeadmConfig, nodeName string) (*time.Time, error)
 
 	// Upgrade related tasks.
 	ReconcileKubeletRBACBinding(ctx context.Context, version semver.Version) error
@@ -123,6 +128,7 @@ type WorkloadCluster interface {
 	RemoveNodeFromKubeadmConfigMap(ctx context.Context, nodeName string, version semver.Version) error
 	ForwardEtcdLeadership(ctx context.Context, machine *clusterv1.Machine, leaderCandidate *clusterv1.Machine) error
 	AllowBootstrapTokensToGetNodes(ctx context.Context) error
+	AllowClusterAdminPermissions(ctx context.Context, version semver.Version) error
 
 	// State recovery tasks.
 	ReconcileEtcdMembers(ctx context.Context, nodeNames []string, version semver.Version) ([]string, error)
@@ -133,13 +139,14 @@ type Workload struct {
 	Client              ctrlclient.Client
 	CoreDNSMigrator     coreDNSMigrator
 	etcdClientGenerator etcdClientFor
+	restConfig          *rest.Config
 }
 
 var _ WorkloadCluster = &Workload{}
 
 func (w *Workload) getControlPlaneNodes(ctx context.Context) (*corev1.NodeList, error) {
 	controlPlaneNodes := &corev1.NodeList{}
-	controlPlaneNodeNames := sets.NewString()
+	controlPlaneNodeNames := sets.Set[string]{}
 
 	for _, label := range []string{labelNodeRoleOldControlPlane, labelNodeRoleControlPlane} {
 		nodes := &corev1.NodeList{}
@@ -430,11 +437,68 @@ func (w *Workload) ClusterStatus(ctx context.Context) (ClusterStatus, error) {
 	return status, nil
 }
 
-func generateClientCert(caCertEncoded, caKeyEncoded []byte) (tls.Certificate, error) {
-	privKey, err := certs.NewPrivateKey()
-	if err != nil {
-		return tls.Certificate{}, err
+// GetAPIServerCertificateExpiry returns the certificate expiry of the apiserver on the given node.
+func (w *Workload) GetAPIServerCertificateExpiry(ctx context.Context, kubeadmConfig *bootstrapv1.KubeadmConfig, nodeName string) (*time.Time, error) {
+	// Create a proxy.
+	p := proxy.Proxy{
+		Kind:       "pods",
+		Namespace:  metav1.NamespaceSystem,
+		KubeConfig: w.restConfig,
+		Port:       int(calculateAPIServerPort(kubeadmConfig)),
 	}
+
+	// Create a dialer.
+	dialer, err := proxy.NewDialer(p)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get certificate expiry for kube-apiserver on Node/%s: failed to create dialer", nodeName)
+	}
+
+	// Dial to the kube-apiserver.
+	rawConn, err := dialer.DialContextWithAddr(ctx, staticPodName("kube-apiserver", nodeName))
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get certificate expiry for kube-apiserver on Node/%s: unable to dial to kube-apiserver", nodeName)
+	}
+
+	// Execute a TLS handshake over the connection to the kube-apiserver.
+	// xref: roughly same code as in tls.DialWithDialer.
+	conn := tls.Client(rawConn, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // Intentionally not verifying the server cert here.
+	if err := conn.HandshakeContext(ctx); err != nil {
+		_ = rawConn.Close()
+		return nil, errors.Wrapf(err, "unable to get certificate expiry for kube-apiserver on Node/%s: TLS handshake with the kube-apiserver failed", nodeName)
+	}
+	defer conn.Close()
+
+	// Return the expiry of the peer certificate with cn=kube-apiserver (which is the one generated by kubeadm).
+	var kubeAPIServerCert *x509.Certificate
+	for _, cert := range conn.ConnectionState().PeerCertificates {
+		if cert.Subject.CommonName == kubeadmAPIServerCertCommonName {
+			kubeAPIServerCert = cert
+		}
+	}
+	if kubeAPIServerCert == nil {
+		return nil, errors.Wrapf(err, "unable to get certificate expiry for kube-apiserver on Node/%s: couldn't get peer certificate with cn=%q", nodeName, kubeadmAPIServerCertCommonName)
+	}
+	return &kubeAPIServerCert.NotAfter, nil
+}
+
+// calculateAPIServerPort calculates the kube-apiserver bind port based
+// on a KubeadmConfig.
+func calculateAPIServerPort(config *bootstrapv1.KubeadmConfig) int32 {
+	if config.Spec.InitConfiguration != nil &&
+		config.Spec.InitConfiguration.LocalAPIEndpoint.BindPort != 0 {
+		return config.Spec.InitConfiguration.LocalAPIEndpoint.BindPort
+	}
+
+	if config.Spec.JoinConfiguration != nil &&
+		config.Spec.JoinConfiguration.ControlPlane != nil &&
+		config.Spec.JoinConfiguration.ControlPlane.LocalAPIEndpoint.BindPort != 0 {
+		return config.Spec.JoinConfiguration.ControlPlane.LocalAPIEndpoint.BindPort
+	}
+
+	return 6443
+}
+
+func generateClientCert(caCertEncoded, caKeyEncoded []byte, clientKey *rsa.PrivateKey) (tls.Certificate, error) {
 	caCert, err := certs.DecodeCertPEM(caCertEncoded)
 	if err != nil {
 		return tls.Certificate{}, err
@@ -443,11 +507,11 @@ func generateClientCert(caCertEncoded, caKeyEncoded []byte) (tls.Certificate, er
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	x509Cert, err := newClientCert(caCert, privKey, caKey)
+	x509Cert, err := newClientCert(caCert, clientKey, caKey)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	return tls.X509KeyPair(certs.EncodeCertPEM(x509Cert), certs.EncodePrivateKeyPEM(privKey))
+	return tls.X509KeyPair(certs.EncodeCertPEM(x509Cert), certs.EncodePrivateKeyPEM(clientKey))
 }
 
 func newClientCert(caCert *x509.Certificate, key *rsa.PrivateKey, caKey crypto.Signer) (*x509.Certificate, error) {
@@ -557,12 +621,24 @@ func yamlToUnstructured(rawYAML []byte) (*unstructured.Unstructured, error) {
 }
 
 // ImageRepositoryFromClusterConfig returns the image repository to use. It returns:
+<<<<<<< HEAD
 // * clusterConfig.ImageRepository if set.
 // * "registry.k8s.io" if v1.25 <= version < v1.26 to migrate to the new registry
 // * "" otherwise.
 // Beginning with kubernetes v1.25, the default registry for kubernetes is registry.k8s.io
 // instead of k8s.gcr.io which is why references should get migrated when upgrading to v1.25.
 // The migration follows the behavior of `kubeadm upgrade`.
+=======
+//   - clusterConfig.ImageRepository if set.
+//   - else either k8s.gcr.io or registry.k8s.io depending on the default registry of the kubeadm
+//     binary of the given kubernetes version. This is only done for Kubernetes versions >= v1.22.0
+//     and < v1.26.0 because in this version range the default registry was changed.
+//
+// Note: Please see the following issue for more context: https://github.com/kubernetes-sigs/cluster-api/issues/7833
+// tl;dr is that the imageRepository must be in sync with the default registry of kubeadm.
+// Otherwise kubeadm preflight checks will fail because kubeadm is trying to pull the CoreDNS image
+// from the wrong repository (<registry>/coredns instead of <registry>/coredns/coredns).
+>>>>>>> v1.5.7
 func ImageRepositoryFromClusterConfig(clusterConfig *bootstrapv1.ClusterConfiguration, kubernetesVersion semver.Version) string {
 	// If ImageRepository is explicitly specified, return early.
 	if clusterConfig != nil &&
@@ -570,11 +646,19 @@ func ImageRepositoryFromClusterConfig(clusterConfig *bootstrapv1.ClusterConfigur
 		return clusterConfig.ImageRepository
 	}
 
+<<<<<<< HEAD
 	// If v1.25 <= version < v1.26 return the default Kubernetes image repository to
 	// migrate to the new location and not cause changes else.
 	if kubernetesVersion.GTE(minKubernetesVersionImageRegistryMigration) &&
 		kubernetesVersion.LT(nextKubernetesVersionImageRegistryMigration) {
 		return kubernetesImageRepository
+=======
+	// If v1.22.0 <= version < v1.26.0 return the default registry of the
+	// corresponding kubeadm binary.
+	if kubernetesVersion.GTE(kubeadm.MinKubernetesVersionImageRegistryMigration) &&
+		kubernetesVersion.LT(kubeadm.NextKubernetesVersionImageRegistryMigration) {
+		return kubeadm.GetDefaultRegistry(kubernetesVersion)
+>>>>>>> v1.5.7
 	}
 
 	// Use defaulting or current values otherwise.

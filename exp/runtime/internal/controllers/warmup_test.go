@@ -60,7 +60,7 @@ func Test_warmupRunnable_Start(t *testing.T) {
 
 		for _, name := range []string{"ext1", "ext2", "ext3"} {
 			server, err := fakeSecureExtensionServer(discoveryHandler("first", "second", "third"))
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			defer server.Close()
 			extensionConfig := fakeExtensionConfigForURL(ns.Name, name, server.URL)
 			extensionConfig.Annotations[runtimev1.InjectCAFromSecretAnnotation] = caCertSecret.GetNamespace() + "/" + caCertSecret.GetName()
@@ -86,17 +86,17 @@ func Test_warmupRunnable_Start(t *testing.T) {
 		}
 		list := &runtimev1.ExtensionConfigList{}
 		g.Expect(env.GetAPIReader().List(ctx, list)).To(Succeed())
-		g.Expect(len(list.Items)).To(Equal(3))
+		g.Expect(list.Items).To(HaveLen(3))
 		for i, config := range list.Items {
 			// Expect three handlers for each extension and expect the name to be the handler name plus the extension name.
 			handlers := config.Status.Handlers
-			g.Expect(len(handlers)).To(Equal(3))
+			g.Expect(handlers).To(HaveLen(3))
 			g.Expect(handlers[0].Name).To(Equal(fmt.Sprintf("first.ext%d", i+1)))
 			g.Expect(handlers[1].Name).To(Equal(fmt.Sprintf("second.ext%d", i+1)))
 			g.Expect(handlers[2].Name).To(Equal(fmt.Sprintf("third.ext%d", i+1)))
 
 			conditions := config.GetConditions()
-			g.Expect(len(conditions)).To(Equal(1))
+			g.Expect(conditions).To(HaveLen(1))
 			g.Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
 			g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 		}
@@ -105,7 +105,7 @@ func Test_warmupRunnable_Start(t *testing.T) {
 	t.Run("fail to warm up registry on Start with broken extension", func(t *testing.T) {
 		// This test should time out and throw a failure.
 		ns, err := env.CreateNamespace(ctx, "test-runtime-extension")
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).ToNot(HaveOccurred())
 
 		caCertSecret := fakeCASecret(ns.Name, "ext1-webhook", testcerts.CACert)
 		// Create the secret which contains the ca certificate.
@@ -127,7 +127,7 @@ func Test_warmupRunnable_Start(t *testing.T) {
 				continue
 			}
 			server, err := fakeSecureExtensionServer(discoveryHandler("first", "second", "third"))
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			defer server.Close()
 
 			extensionConfig := fakeExtensionConfigForURL(ns.Name, name, server.URL)
@@ -153,7 +153,7 @@ func Test_warmupRunnable_Start(t *testing.T) {
 		}
 		list := &runtimev1.ExtensionConfigList{}
 		g.Expect(env.GetAPIReader().List(ctx, list)).To(Succeed())
-		g.Expect(len(list.Items)).To(Equal(3))
+		g.Expect(list.Items).To(HaveLen(3))
 
 		for i, config := range list.Items {
 			handlers := config.Status.Handlers
@@ -161,21 +161,21 @@ func Test_warmupRunnable_Start(t *testing.T) {
 
 			// Expect no handlers and a failed condition for the broken extension.
 			if config.Name == brokenExtension {
-				g.Expect(len(conditions)).To(Equal(1))
+				g.Expect(conditions).To(HaveLen(1))
 				g.Expect(conditions[0].Status).To(Equal(corev1.ConditionFalse))
 				g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
-				g.Expect(len(handlers)).To(Equal(0))
+				g.Expect(handlers).To(BeEmpty())
 
 				continue
 			}
 
 			// For other extensions expect handler name plus the extension name, and expect the condition to be True.
-			g.Expect(len(handlers)).To(Equal(3))
+			g.Expect(handlers).To(HaveLen(3))
 			g.Expect(handlers[0].Name).To(Equal(fmt.Sprintf("first.ext%d", i+1)))
 			g.Expect(handlers[1].Name).To(Equal(fmt.Sprintf("second.ext%d", i+1)))
 			g.Expect(handlers[2].Name).To(Equal(fmt.Sprintf("third.ext%d", i+1)))
 
-			g.Expect(len(conditions)).To(Equal(1))
+			g.Expect(conditions).To(HaveLen(1))
 			g.Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
 			g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 		}

@@ -131,6 +131,17 @@ func TestIPAddressValidateCreate(t *testing.T) {
 			expectErr: true,
 		},
 		{
+<<<<<<< HEAD
+=======
+			name: "an empty gateway should be allowed",
+			ip: getAddress(false, func(addr *ipamv1.IPAddress) {
+				addr.Spec.Gateway = ""
+			}),
+			extraObjs: []client.Object{claim},
+			expectErr: false,
+		},
+		{
+>>>>>>> v1.5.7
 			name: "a pool reference that does not match the claim should be rejected",
 			ip: getAddress(false, func(addr *ipamv1.IPAddress) {
 				addr.Spec.PoolRef.Name = "nothing"
@@ -214,11 +225,21 @@ func TestIPAddressValidateUpdate(t *testing.T) {
 			wh := IPAddress{
 				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.extraObjs...).Build(),
 			}
+<<<<<<< HEAD
 			if tt.expectErr {
 				g.Expect(wh.ValidateUpdate(context.Background(), &tt.oldIP, &tt.newIP)).NotTo(Succeed())
 			} else {
 				g.Expect(wh.ValidateUpdate(context.Background(), &tt.oldIP, &tt.newIP)).To(Succeed())
 			}
+=======
+			warnings, err := wh.ValidateUpdate(context.Background(), &tt.oldIP, &tt.newIP)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+			}
+			g.Expect(warnings).To(BeEmpty())
+>>>>>>> v1.5.7
 		})
 	}
 }

@@ -240,7 +240,7 @@ func Test_providerUpgrader_getUpgradeInfo(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 			g.Expect(got).To(Equal(tt.want))
 		})
@@ -446,9 +446,9 @@ func fakeProvider(name string, providerType clusterctlv1.ProviderType, version, 
 			Namespace:       targetNamespace,
 			Name:            clusterctlv1.ManifestLabel(name, providerType),
 			Labels: map[string]string{
-				clusterctlv1.ClusterctlLabelName:     "",
-				clusterv1.ProviderLabelName:          clusterctlv1.ManifestLabel(name, providerType),
-				clusterctlv1.ClusterctlCoreLabelName: clusterctlv1.ClusterctlCoreLabelInventoryValue,
+				clusterctlv1.ClusterctlLabel:     "",
+				clusterv1.ProviderNameLabel:      clusterctlv1.ManifestLabel(name, providerType),
+				clusterctlv1.ClusterctlCoreLabel: clusterctlv1.ClusterctlCoreLabelInventoryValue,
 			},
 		},
 		ProviderName: name,

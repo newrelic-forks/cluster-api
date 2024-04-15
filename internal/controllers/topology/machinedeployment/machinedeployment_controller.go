@@ -22,6 +22,10 @@ import (
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
+<<<<<<< HEAD
+=======
+	"k8s.io/klog/v2"
+>>>>>>> v1.5.7
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -75,10 +79,13 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, opt
 // i.e. the templates would otherwise be orphaned after the MachineDeployment deletion completes.
 // Additional context:
 // * MachineDeployment deletion:
-//   * MachineDeployments are deleted and garbage collected first (without waiting until all MachineSets are also deleted).
-//   * After that, deletion of MachineSets is automatically triggered by Kubernetes based on owner references.
+//   - MachineDeployments are deleted and garbage collected first (without waiting until all MachineSets are also deleted).
+//   - After that, deletion of MachineSets is automatically triggered by Kubernetes based on owner references.
+//
 // Note: We assume templates are not reused by different MachineDeployments, which is only true for topology-owned
-//       MachineDeployments.
+//
+//	MachineDeployments.
+//
 // We don't have to set the finalizer, as it's already set during MachineDeployment creation
 // in the cluster topology controller.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
@@ -94,6 +101,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		// Error reading the object - requeue the request.
 		return ctrl.Result{}, errors.Wrapf(err, "failed to get MachineDeployment/%s", req.NamespacedName.Name)
 	}
+
+	log = log.WithValues("Cluster", klog.KRef(md.Namespace, md.Spec.ClusterName))
+	ctx = ctrl.LoggerInto(ctx, log)
 
 	cluster, err := util.GetClusterByName(ctx, r.Client, md.Namespace, md.Spec.ClusterName)
 	if err != nil {
@@ -119,48 +129,66 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 
 	// Handle deletion reconciliation loop.
 	if !md.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, md)
+		return ctrl.Result{}, r.reconcileDelete(ctx, md)
 	}
 
+	// Add finalizer first if not set to avoid the race condition between init and delete.
+	// Note: Finalizers in general can only be added when the deletionTimestamp is not set.
+	if !controllerutil.ContainsFinalizer(md, clusterv1.MachineDeploymentTopologyFinalizer) {
+		controllerutil.AddFinalizer(md, clusterv1.MachineDeploymentTopologyFinalizer)
+		return ctrl.Result{}, nil
+	}
+
+<<<<<<< HEAD
 	// If the MachineDeployment is not being deleted ensure the finalizer is set.
 	controllerutil.AddFinalizer(md, clusterv1.MachineDeploymentTopologyFinalizer)
 
+=======
+>>>>>>> v1.5.7
 	return ctrl.Result{}, nil
 }
 
 // reconcileDelete deletes templates referenced in a MachineDeployment, if the templates are not used by other
 // MachineDeployments or MachineSets.
-func (r *Reconciler) reconcileDelete(ctx context.Context, md *clusterv1.MachineDeployment) (ctrl.Result, error) {
+func (r *Reconciler) reconcileDelete(ctx context.Context, md *clusterv1.MachineDeployment) error {
 	// Get the corresponding MachineSets.
 	msList, err := machineset.GetMachineSetsForDeployment(ctx, r.APIReader, client.ObjectKeyFromObject(md))
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Calculate which templates are still in use by MachineDeployments or MachineSets which are not in deleting state.
 	templatesInUse, err := machineset.CalculateTemplatesInUse(md, msList)
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Delete unused templates.
 	ref := md.Spec.Template.Spec.Bootstrap.ConfigRef
 	if err := machineset.DeleteTemplateIfUnused(ctx, r.Client, templatesInUse, ref); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to delete bootstrap template for %s", tlog.KObj{Obj: md})
+		return errors.Wrapf(err, "failed to delete bootstrap template for %s", tlog.KObj{Obj: md})
 	}
 	ref = &md.Spec.Template.Spec.InfrastructureRef
 	if err := machineset.DeleteTemplateIfUnused(ctx, r.Client, templatesInUse, ref); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to delete infrastructure template for %s", tlog.KObj{Obj: md})
+		return errors.Wrapf(err, "failed to delete infrastructure template for %s", tlog.KObj{Obj: md})
 	}
 
 	// If the MachineDeployment has a MachineHealthCheck delete it.
 	if err := r.deleteMachineHealthCheckForMachineDeployment(ctx, md); err != nil {
+<<<<<<< HEAD
 		return ctrl.Result{}, err
+=======
+		return err
+>>>>>>> v1.5.7
 	}
 
 	controllerutil.RemoveFinalizer(md, clusterv1.MachineDeploymentTopologyFinalizer)
 
+<<<<<<< HEAD
 	return ctrl.Result{}, nil
+=======
+	return nil
+>>>>>>> v1.5.7
 }
 
 func (r *Reconciler) deleteMachineHealthCheckForMachineDeployment(ctx context.Context, md *clusterv1.MachineDeployment) error {

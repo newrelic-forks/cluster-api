@@ -39,12 +39,18 @@ func TestMachineHealthCheckDefault(t *testing.T) {
 				MatchLabels: map[string]string{"foo": "bar"},
 			},
 			RemediationTemplate: &corev1.ObjectReference{},
+			UnhealthyConditions: []UnhealthyCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionFalse,
+				},
+			},
 		},
 	}
 	t.Run("for MachineHealthCheck", utildefaulting.DefaultValidateTest(mhc))
 	mhc.Default()
 
-	g.Expect(mhc.Labels[ClusterLabelName]).To(Equal(mhc.Spec.ClusterName))
+	g.Expect(mhc.Labels[ClusterNameLabel]).To(Equal(mhc.Spec.ClusterName))
 	g.Expect(mhc.Spec.MaxUnhealthy.String()).To(Equal("100%"))
 	g.Expect(mhc.Spec.NodeStartupTimeout).ToNot(BeNil())
 	g.Expect(*mhc.Spec.NodeStartupTimeout).To(Equal(metav1.Duration{Duration: 10 * time.Minute}))
@@ -77,14 +83,28 @@ func TestMachineHealthCheckLabelSelectorAsSelectorValidation(t *testing.T) {
 					Selector: metav1.LabelSelector{
 						MatchLabels: tt.selectors,
 					},
+					UnhealthyConditions: []UnhealthyCondition{
+						{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
 				},
 			}
 			if tt.expectErr {
-				g.Expect(mhc.ValidateCreate()).NotTo(Succeed())
-				g.Expect(mhc.ValidateUpdate(mhc)).NotTo(Succeed())
+				warnings, err := mhc.ValidateCreate()
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = mhc.ValidateUpdate(mhc)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			} else {
-				g.Expect(mhc.ValidateCreate()).To(Succeed())
-				g.Expect(mhc.ValidateUpdate(mhc)).To(Succeed())
+				warnings, err := mhc.ValidateCreate()
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = mhc.ValidateUpdate(mhc)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			}
 		})
 	}
@@ -123,6 +143,12 @@ func TestMachineHealthCheckClusterNameImmutable(t *testing.T) {
 							"test": "test",
 						},
 					},
+					UnhealthyConditions: []UnhealthyCondition{
+						{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
 				},
 			}
 			oldMHC := &MachineHealthCheck{
@@ -133,13 +159,81 @@ func TestMachineHealthCheckClusterNameImmutable(t *testing.T) {
 							"test": "test",
 						},
 					},
+					UnhealthyConditions: []UnhealthyCondition{
+						{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
 				},
 			}
 
+			warnings, err := newMHC.ValidateUpdate(oldMHC)
 			if tt.expectErr {
-				g.Expect(newMHC.ValidateUpdate(oldMHC)).NotTo(Succeed())
+				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(newMHC.ValidateUpdate(oldMHC)).To(Succeed())
+				g.Expect(err).ToNot(HaveOccurred())
+			}
+			g.Expect(warnings).To(BeEmpty())
+		})
+	}
+}
+
+func TestMachineHealthCheckUnhealthyConditions(t *testing.T) {
+	tests := []struct {
+		name               string
+		unhealthConditions []UnhealthyCondition
+		expectErr          bool
+	}{
+		{
+			name: "pass with correctly defined unhealthyConditions",
+			unhealthConditions: []UnhealthyCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionFalse,
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:               "fail if the UnhealthCondition array is nil",
+			unhealthConditions: nil,
+			expectErr:          true,
+		},
+		{
+			name:               "fail if the UnhealthCondition array is empty",
+			unhealthConditions: []UnhealthyCondition{},
+			expectErr:          true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			mhc := &MachineHealthCheck{
+				Spec: MachineHealthCheckSpec{
+					Selector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "test",
+						},
+					},
+					UnhealthyConditions: tt.unhealthConditions,
+				},
+			}
+			if tt.expectErr {
+				warnings, err := mhc.ValidateCreate()
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = mhc.ValidateUpdate(mhc)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+			} else {
+				warnings, err := mhc.ValidateCreate()
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = mhc.ValidateUpdate(mhc)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			}
 		})
 	}
@@ -200,15 +294,29 @@ func TestMachineHealthCheckNodeStartupTimeout(t *testing.T) {
 						"test": "test",
 					},
 				},
+				UnhealthyConditions: []UnhealthyCondition{
+					{
+						Type:   corev1.NodeReady,
+						Status: corev1.ConditionFalse,
+					},
+				},
 			},
 		}
 
 		if tt.expectErr {
-			g.Expect(mhc.ValidateCreate()).NotTo(Succeed())
-			g.Expect(mhc.ValidateUpdate(mhc)).NotTo(Succeed())
+			warnings, err := mhc.ValidateCreate()
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
+			warnings, err = mhc.ValidateUpdate(mhc)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
 		} else {
-			g.Expect(mhc.ValidateCreate()).To(Succeed())
-			g.Expect(mhc.ValidateUpdate(mhc)).To(Succeed())
+			warnings, err := mhc.ValidateCreate()
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
+			warnings, err = mhc.ValidateUpdate(mhc)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
 		}
 	}
 }
@@ -253,24 +361,47 @@ func TestMachineHealthCheckMaxUnhealthy(t *testing.T) {
 						"test": "test",
 					},
 				},
+				UnhealthyConditions: []UnhealthyCondition{
+					{
+						Type:   corev1.NodeReady,
+						Status: corev1.ConditionFalse,
+					},
+				},
 			},
 		}
 
 		if tt.expectErr {
-			g.Expect(mhc.ValidateCreate()).NotTo(Succeed())
-			g.Expect(mhc.ValidateUpdate(mhc)).NotTo(Succeed())
+			warnings, err := mhc.ValidateCreate()
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
+			warnings, err = mhc.ValidateUpdate(mhc)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
 		} else {
-			g.Expect(mhc.ValidateCreate()).To(Succeed())
-			g.Expect(mhc.ValidateUpdate(mhc)).To(Succeed())
+			warnings, err := mhc.ValidateCreate()
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
+			warnings, err = mhc.ValidateUpdate(mhc)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(warnings).To(BeEmpty())
 		}
 	}
 }
 
 func TestMachineHealthCheckSelectorValidation(t *testing.T) {
 	g := NewWithT(t)
-	mhc := &MachineHealthCheck{}
+	mhc := &MachineHealthCheck{
+		Spec: MachineHealthCheckSpec{
+			UnhealthyConditions: []UnhealthyCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionFalse,
+				},
+			},
+		},
+	}
 	err := mhc.validate(nil)
-	g.Expect(err).ToNot(BeNil())
+	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("selector must not be empty"))
 }
 
@@ -281,8 +412,14 @@ func TestMachineHealthCheckClusterNameSelectorValidation(t *testing.T) {
 			ClusterName: "foo",
 			Selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					ClusterLabelName: "bar",
+					ClusterNameLabel: "bar",
 					"baz":            "qux",
+				},
+			},
+			UnhealthyConditions: []UnhealthyCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionFalse,
 				},
 			},
 		},
@@ -291,9 +428,9 @@ func TestMachineHealthCheckClusterNameSelectorValidation(t *testing.T) {
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("cannot specify a cluster selector other than the one specified by ClusterName"))
 
-	mhc.Spec.Selector.MatchLabels[ClusterLabelName] = "foo"
+	mhc.Spec.Selector.MatchLabels[ClusterNameLabel] = "foo"
 	g.Expect(mhc.validate(nil)).To(Succeed())
-	delete(mhc.Spec.Selector.MatchLabels, ClusterLabelName)
+	delete(mhc.Spec.Selector.MatchLabels, ClusterNameLabel)
 	g.Expect(mhc.validate(nil)).To(Succeed())
 }
 
@@ -305,6 +442,12 @@ func TestMachineHealthCheckRemediationTemplateNamespaceValidation(t *testing.T) 
 		Spec: MachineHealthCheckSpec{
 			Selector:            metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}},
 			RemediationTemplate: &corev1.ObjectReference{Namespace: "foo"},
+			UnhealthyConditions: []UnhealthyCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionFalse,
+				},
+			},
 		},
 	}
 	invalid := valid.DeepCopy()

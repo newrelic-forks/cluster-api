@@ -17,16 +17,22 @@ limitations under the License.
 package repository
 
 import (
+<<<<<<< HEAD
 	"fmt"
+=======
+>>>>>>> v1.5.7
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+<<<<<<< HEAD
+=======
+	"github.com/adrg/xdg"
+>>>>>>> v1.5.7
 	"github.com/drone/envsubst/v2"
 	"github.com/pkg/errors"
-	"k8s.io/client-go/util/homedir"
 
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
 	logf "sigs.k8s.io/cluster-api/cmd/clusterctl/log"
@@ -39,7 +45,7 @@ const (
 
 // Overrider provides behavior to determine the overrides layer.
 type Overrider interface {
-	Path() string
+	Path() (string, error)
 }
 
 // overrides implements the Overrider interface.
@@ -69,22 +75,33 @@ func newOverride(o *newOverrideInput) Overrider {
 
 // Path returns the fully formed path to the file within the specified
 // overrides config.
-func (o *overrides) Path() string {
-	basepath := filepath.Join(homedir.HomeDir(), config.ConfigFolder, overrideFolder)
+func (o *overrides) Path() (string, error) {
+	configDirectory, err := xdg.ConfigFile(config.ConfigFolderXDG)
+	if err != nil {
+		return "", err
+	}
+	basepath := filepath.Join(configDirectory, overrideFolder)
 	f, err := o.configVariablesClient.Get(overrideFolderKey)
 	if err == nil && strings.TrimSpace(f) != "" {
 		basepath = f
 
+<<<<<<< HEAD
 		evaluatedBasePath, err := envsubst.Eval(basepath, os.Getenv)
 		if err != nil {
 			logf.Log.Info(fmt.Sprintf("⚠️overridesFolder %q could not be evaluated: %v", basepath, err))
 		} else {
 			basepath = evaluatedBasePath
+=======
+		basepath, err = envsubst.Eval(basepath, os.Getenv)
+		if err != nil {
+			return "", errors.Wrapf(err, "unable to evaluate %s: %q", overrideFolderKey, basepath)
+>>>>>>> v1.5.7
 		}
 
 		if runtime.GOOS == "windows" {
 			parsedBasePath, err := url.Parse(basepath)
 			if err != nil {
+<<<<<<< HEAD
 				logf.Log.Info(fmt.Sprintf("⚠️overridesFolder %q could not be parsed: %v", basepath, err))
 			} else {
 				// in case of windows, we should take care of removing the additional / which is required by the URI standard
@@ -93,6 +110,16 @@ func (o *overrides) Path() string {
 				// https://support.microsoft.com/en-us/help/4467268/url-encoded-unc-paths-not-url-decoded-in-windows-10-version-1803-later
 				basepath = filepath.FromSlash(strings.TrimPrefix(parsedBasePath.Path, "/"))
 			}
+=======
+				return "", errors.Wrapf(err, "unable to parse %s: %q", overrideFolderKey, basepath)
+			}
+
+			// in case of windows, we should take care of removing the additional / which is required by the URI standard
+			// for windows local paths. see https://blogs.msdn.microsoft.com/ie/2006/12/06/file-uris-in-windows/ for more details.
+			// Encoded file paths are not required in Windows 10 versions <1803 and are unsupported in Windows 10 >=1803
+			// https://support.microsoft.com/en-us/help/4467268/url-encoded-unc-paths-not-url-decoded-in-windows-10-version-1803-later
+			basepath = filepath.FromSlash(strings.TrimPrefix(parsedBasePath.Path, "/"))
+>>>>>>> v1.5.7
 		}
 	}
 
@@ -101,15 +128,19 @@ func (o *overrides) Path() string {
 		o.providerLabel,
 		o.version,
 		o.filePath,
-	)
+	), nil
 }
 
 // getLocalOverride return local override file from the config folder, if it exists.
 // This is required for development purposes, but it can be used also in production as a workaround for problems on the official repositories.
 func getLocalOverride(info *newOverrideInput) ([]byte, error) {
-	overridePath := newOverride(info).Path()
+	overridePath, err := newOverride(info).Path()
+	if err != nil {
+		return nil, err
+	}
+
 	// it the local override exists, use it
-	_, err := os.Stat(overridePath)
+	_, err = os.Stat(overridePath)
 	if err == nil {
 		content, err := os.ReadFile(overridePath) //nolint:gosec
 		if err != nil {

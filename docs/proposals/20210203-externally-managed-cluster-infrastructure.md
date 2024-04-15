@@ -79,7 +79,7 @@ This proposal introduces support to allow infrastructure cluster resources (e.g.
 Currently, Cluster API infrastructure providers support an opinionated happy path to create and manage cluster infrastructure lifecycle.
 The fundamental use case we want to support is out of tree controllers or tools that can manage these resources.
 
-For example, users could create clusters using tools such as Terraform, Crossplane, or Kops and run CAPI on top of installed infrastructure.
+For example, users could create clusters using tools such as Terraform, Crossplane, or kOps and run CAPI on top of installed infrastructure.
 
 The proposal might also ease adoption of Cluster API in heavily restricted environments where the provider infrastructure for the cluster needs to be managed out of band.
 
@@ -110,7 +110,7 @@ Additionally, the external management system must provide all required fields wi
 While an "externally managed" InfraCluster won't reconcile or manage the lifecycle of the cluster infrastructure, CAPI will still be able to create compute nodes within it.
 
 The machine controller must be able to operate without hard dependencies regardless of the cluster infrastructure being managed or externally managed.
-![](https://i.imgur.com/nA61XJt.png)
+![](./images/externally-managed-cluster-infrastructure/infrastructure.png)
 
 ### User Stories
 

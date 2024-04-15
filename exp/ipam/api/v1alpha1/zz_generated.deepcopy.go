@@ -23,7 +23,10 @@ package v1alpha1
 
 import (
 	runtime "k8s.io/apimachinery/pkg/runtime"
+<<<<<<< HEAD
 
+=======
+>>>>>>> v1.5.7
 	"sigs.k8s.io/cluster-api/api/v1beta1"
 )
 

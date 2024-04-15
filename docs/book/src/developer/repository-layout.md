@@ -12,6 +12,7 @@ cluster-api
 └───config
 └───controllers
 └───controlplane
+└───dev
 └───docs
 └───errors
 └───exp
@@ -29,7 +30,11 @@ cluster-api
 └───Makefile
 ```
 
+<<<<<<< HEAD
 ### Github
+=======
+### GitHub
+>>>>>>> v1.5.7
 
 [~/.github](https://github.com/kubernetes-sigs/cluster-api/tree/main/.github)
 
@@ -57,7 +62,7 @@ This folder contains a reference implementation of a Cluster API Control Plane p
 
 ### Cluster API Provider Docker 
 
-[~/test/insfrastructure/docker](https://github.com/kubernetes-sigs/cluster-api/tree/main/test/infrastructure/docker)
+[~/test/infrastructure/docker](https://github.com/kubernetes-sigs/cluster-api/tree/main/test/infrastructure/docker)
 
 This folder contains a reference implementation of an infrastructure provider for the Cluster API project using Docker. This provider is intended for development purposes only. 
 
@@ -94,7 +99,7 @@ This folder contains resources which are not meant to be used directly by users 
 
 [~/controllers](https://github.com/kubernetes-sigs/cluster-api/tree/main/controllers)
 
-This folder contains reconciler types which provide access to CAPI controllers present in [~/internal/controllers](https://github.com/kubernetes-sigs/cluster-api/tree/main/internal/controllers) directory to our users. These types can be used users by users to run any of the Cluster API controllers in an external program.
+This folder contains reconciler types which provide access to CAPI controllers present in [~/internal/controllers](https://github.com/kubernetes-sigs/cluster-api/tree/main/internal/controllers) directory to our users. These types can be used by users to run any of the Cluster API controllers in an external program.
 
 ### Documentation
 
@@ -116,9 +121,15 @@ This folder has scripts used for building, testing and developer workflow.
 
 This folder consists of CI scripts related to setup, build and e2e tests. These are mostly called by CI jobs.
 
+<<<<<<< HEAD
 [~/third_party](https://github.com/kubernetes-sigs/cluster-api/tree/release-1.2/third_party)
 
 This folder is used to copy code from other projects in-tree.
+=======
+[~/dev](https://github.com/kubernetes-sigs/cluster-api/tree/main/dev)
+
+This folder has example configuration for integrating Cluster API development with tools like IDEs.
+>>>>>>> v1.5.7
 
 ### Util, Feature and Errors
 
@@ -148,7 +159,7 @@ The [api](#api) folder contains webhooks consisting of validators and defaults f
 
 [~/internal/webhooks](https://github.com/kubernetes-sigs/cluster-api/tree/main/internal/webhooks)
 
-This directory contains the implementation of some of the Cluster API webhooks. The internal implementation means that the methods supplied by this package can not be imported by external code bases. 
+This directory contains the implementation of some of the Cluster API webhooks. The internal implementation means that the methods supplied by this package cannot be imported by external code bases. 
 
 [~/webhooks](https://github.com/kubernetes-sigs/cluster-api/tree/main/webhooks)
 

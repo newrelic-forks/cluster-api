@@ -20,12 +20,17 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+<<<<<<< HEAD
 	"github.com/google/go-github/v45/github"
+=======
+	"github.com/google/go-github/v48/github"
+>>>>>>> v1.5.7
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +51,7 @@ func Test_templateClient_GetFromConfigMap(t *testing.T) {
 	g := NewWithT(t)
 
 	configClient, err := config.New("", config.InjectReader(test.NewFakeReader()))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	configMap := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
@@ -140,7 +145,7 @@ func Test_templateClient_GetFromConfigMap(t *testing.T) {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			wantTemplate, err := repository.NewTemplate(repository.TemplateInput{
 				RawArtifact:           []byte(tt.want),
@@ -149,7 +154,7 @@ func Test_templateClient_GetFromConfigMap(t *testing.T) {
 				TargetNamespace:       tt.args.targetNamespace,
 				SkipTemplateProcess:   tt.args.skipTemplateProcess,
 			})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(got).To(Equal(wantTemplate))
 		})
 	}
@@ -162,7 +167,7 @@ func Test_templateClient_getGitHubFileContent(t *testing.T) {
 	defer teardown()
 
 	configClient, err := config.New("", config.InjectReader(test.NewFakeReader()))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	mux.HandleFunc("/repos/kubernetes-sigs/cluster-api/contents/config/default/cluster-template.yaml", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{
@@ -218,7 +223,50 @@ func Test_templateClient_getGitHubFileContent(t *testing.T) {
 				return
 			}
 
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
+
+			g.Expect(got).To(Equal(tt.want))
+		})
+	}
+}
+
+func Test_templateClient_getRawUrlFileContent(t *testing.T) {
+	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, template)
+	}))
+
+	defer fakeServer.Close()
+
+	type args struct {
+		rURL string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []byte
+		wantErr bool
+	}{
+		{
+			name: "Return custom template",
+			args: args{
+				rURL: fakeServer.URL,
+			},
+			want:    []byte(template),
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			c := newTemplateClient(TemplateClientInput{})
+			got, err := c.getRawURLFileContent(tt.args.rURL)
+			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+
+			g.Expect(err).ToNot(HaveOccurred())
 
 			g.Expect(got).To(Equal(tt.want))
 		})
@@ -229,7 +277,7 @@ func Test_templateClient_getLocalFileContent(t *testing.T) {
 	g := NewWithT(t)
 
 	tmpDir, err := os.MkdirTemp("", "cc")
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	defer os.RemoveAll(tmpDir)
 
 	path := filepath.Join(tmpDir, "cluster-template.yaml")
@@ -272,7 +320,7 @@ func Test_templateClient_getLocalFileContent(t *testing.T) {
 				return
 			}
 
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			g.Expect(got).To(Equal(tt.want))
 		})
@@ -283,11 +331,11 @@ func Test_templateClient_GetFromURL(t *testing.T) {
 	g := NewWithT(t)
 
 	tmpDir, err := os.MkdirTemp("", "cc")
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	defer os.RemoveAll(tmpDir)
 
 	configClient, err := config.New("", config.InjectReader(test.NewFakeReader()))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	fakeGithubClient, mux, teardown := test.NewFakeGitHub()
 	defer teardown()
@@ -304,8 +352,60 @@ func Test_templateClient_GetFromURL(t *testing.T) {
 		}`)
 	})
 
+	mux.HandleFunc("/repos/some-owner/some-repo/releases/tags/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+		  "tag_name": "v1.0.0",
+		  "name": "v1.0.0",
+		  "id": 12345678,
+		  "url": "https://api.github.com/repos/some-owner/some-repo/releases/12345678",
+		  "assets": [
+			{
+			  "id": 87654321,
+			  "name": "cluster-template.yaml"
+			}
+		  ]
+		}`)
+	})
+
+	mux.HandleFunc("/repos/some-owner/some-repo/releases/assets/87654321", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, template)
+	})
+
+	mux.HandleFunc("/repos/some-owner/some-repo/releases/tags/v2.0.0", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+		  "tag_name": "v2.0.0",
+		  "name": "v2.0.0",
+		  "id": 12345678,
+		  "url": "https://api.github.com/repos/some-owner/some-repo/releases/12345678",
+		  "assets": [
+			{
+			  "id": 22222222,
+			  "name": "cluster-template.yaml"
+			}
+		  ]
+		}`)
+	})
+
+	// redirect asset
+	mux.HandleFunc("/repos/some-owner/some-repo/releases/assets/22222222", func(w http.ResponseWriter, r *http.Request) {
+		// add the "/api-v3" prefix to match the prefix of the fake github server
+		w.Header().Add("Location", "/api-v3/redirected/22222222")
+		w.WriteHeader(http.StatusFound)
+	})
+
+	// redirect location
+	mux.HandleFunc("/redirected/22222222", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, template)
+	})
+
 	path := filepath.Join(tmpDir, "cluster-template.yaml")
 	g.Expect(os.WriteFile(path, []byte(template), 0600)).To(Succeed())
+
+	// redirect stdin
+	saveStdin := os.Stdin
+	defer func() { os.Stdin = saveStdin }()
+	os.Stdin, err = os.Open(path) //nolint:gosec
+	g.Expect(err).ToNot(HaveOccurred())
 
 	type args struct {
 		templateURL         string
@@ -338,6 +438,46 @@ func Test_templateClient_GetFromURL(t *testing.T) {
 			want:    template,
 			wantErr: false,
 		},
+		{
+			name: "Get asset from GitHub release",
+			args: args{
+				templateURL:         "https://github.com/some-owner/some-repo/releases/download/v1.0.0/cluster-template.yaml",
+				targetNamespace:     "",
+				skipTemplateProcess: false,
+			},
+			want:    template,
+			wantErr: false,
+		},
+		{
+			name: "Get asset from GitHub release + redirect",
+			args: args{
+				templateURL:         "https://github.com/some-owner/some-repo/releases/download/v2.0.0/cluster-template.yaml",
+				targetNamespace:     "",
+				skipTemplateProcess: false,
+			},
+			want:    template,
+			wantErr: false,
+		},
+		{
+			name: "Get asset from GitHub release with a wrong URL",
+			args: args{
+				templateURL:         "https://github.com/some-owner/some-repo/releases/wrong/v1.0.0/cluster-template.yaml",
+				targetNamespace:     "",
+				skipTemplateProcess: false,
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "Get from stdin",
+			args: args{
+				templateURL:         "-",
+				targetNamespace:     "",
+				skipTemplateProcess: false,
+			},
+			want:    template,
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -357,7 +497,7 @@ func Test_templateClient_GetFromURL(t *testing.T) {
 				return
 			}
 
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			wantTemplate, err := repository.NewTemplate(repository.TemplateInput{
 				RawArtifact:           []byte(tt.want),
@@ -366,7 +506,7 @@ func Test_templateClient_GetFromURL(t *testing.T) {
 				TargetNamespace:       tt.args.targetNamespace,
 				SkipTemplateProcess:   tt.args.skipTemplateProcess,
 			})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(got).To(Equal(wantTemplate))
 		})
 	}

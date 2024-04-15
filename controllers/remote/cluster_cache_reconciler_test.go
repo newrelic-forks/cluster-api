@@ -45,7 +45,7 @@ func TestClusterCacheReconciler(t *testing.T) {
 
 		// createAndWatchCluster creates a new cluster and ensures the clusterCacheTracker has a clusterAccessor for it
 		createAndWatchCluster := func(clusterName string, testNamespace *corev1.Namespace, g *WithT) {
-			t.Log(fmt.Sprintf("Creating a cluster %q", clusterName))
+			t.Logf("Creating a cluster %q", clusterName)
 			testCluster := &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      clusterName,
@@ -71,7 +71,7 @@ func TestClusterCacheReconciler(t *testing.T) {
 
 			t.Log("Creating a clusterAccessor for the cluster")
 			_, err := cct.GetClient(ctx, testClusterKey)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 		}
 
 		setup := func(t *testing.T, g *WithT) *corev1.Namespace {
@@ -83,11 +83,11 @@ func TestClusterCacheReconciler(t *testing.T) {
 				Scheme:             scheme.Scheme,
 				MetricsBindAddress: "0",
 			})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			t.Log("Setting up a ClusterCacheTracker")
 			cct, err = NewClusterCacheTracker(mgr, ClusterCacheTrackerOptions{})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			t.Log("Creating the ClusterCacheReconciler")
 			r := &ClusterCacheReconciler{
@@ -107,7 +107,7 @@ func TestClusterCacheReconciler(t *testing.T) {
 
 			t.Log("Creating a namespace for the test")
 			ns, err := env.CreateNamespace(ctx, "cluster-cache-test")
-			g.Expect(err).To(BeNil())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			t.Log("Creating clusters to test with")
 			createAndWatchCluster("cluster-1", ns, g)
@@ -136,7 +136,7 @@ func TestClusterCacheReconciler(t *testing.T) {
 			defer teardown(t, g, testNamespace)
 
 			for _, clusterName := range []string{"cluster-1", "cluster-2", "cluster-3"} {
-				t.Log(fmt.Sprintf("Deleting cluster %q", clusterName))
+				t.Logf("Deleting cluster %q", clusterName)
 				obj := &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: testNamespace.Name,
@@ -145,7 +145,7 @@ func TestClusterCacheReconciler(t *testing.T) {
 				}
 				g.Expect(k8sClient.Delete(ctx, obj)).To(Succeed())
 
-				t.Log(fmt.Sprintf("Checking cluster %q's clusterAccessor is removed", clusterName))
+				t.Logf("Checking cluster %q's clusterAccessor is removed", clusterName)
 				g.Eventually(func() bool { return cct.clusterAccessorExists(util.ObjectKey(obj)) }, timeout).Should(BeFalse())
 			}
 		})

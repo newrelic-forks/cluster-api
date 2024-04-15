@@ -74,7 +74,7 @@ func TestExtensionReconciler_Reconcile(t *testing.T) {
 
 	caCertSecret := fakeCASecret(ns.Name, "ext1-webhook", testcerts.CACert)
 	server, err := fakeSecureExtensionServer(discoveryHandler("first", "second", "third"))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	defer server.Close()
 	extensionConfig := fakeExtensionConfigForURL(ns.Name, "ext1", server.URL)
 	extensionConfig.Annotations[runtimev1.InjectCAFromSecretAnnotation] = caCertSecret.GetNamespace() + "/" + caCertSecret.GetName()
@@ -92,9 +92,9 @@ func TestExtensionReconciler_Reconcile(t *testing.T) {
 	t.Run("fail reconcile if registry has not been warmed up", func(t *testing.T) {
 		// Attempt to reconcile. This will be an error as the registry has not been warmed up at this point.
 		res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(extensionConfig)})
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 		// If the registry isn't warm the reconcile loop will return Requeue: True
-		g.Expect(res.Requeue).To(Equal(true))
+		g.Expect(res.Requeue).To(BeTrue())
 	})
 
 	t.Run("successful reconcile and discovery on ExtensionConfig create", func(t *testing.T) {
@@ -108,28 +108,28 @@ func TestExtensionReconciler_Reconcile(t *testing.T) {
 
 		// Reconcile the extension and assert discovery has succeeded.
 		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(extensionConfig)})
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 
 		config := &runtimev1.ExtensionConfig{}
 		g.Expect(env.GetAPIReader().Get(ctx, util.ObjectKey(extensionConfig), config)).To(Succeed())
 
 		// Expect three handlers for the extension and expect the name to be the handler name plus the extension name.
 		handlers := config.Status.Handlers
-		g.Expect(len(handlers)).To(Equal(3))
+		g.Expect(handlers).To(HaveLen(3))
 		g.Expect(handlers[0].Name).To(Equal("first.ext1"))
 		g.Expect(handlers[1].Name).To(Equal("second.ext1"))
 		g.Expect(handlers[2].Name).To(Equal("third.ext1"))
 
 		conditions := config.GetConditions()
-		g.Expect(len(conditions)).To(Equal(1))
+		g.Expect(conditions).To(HaveLen(1))
 		g.Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
 		g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 		_, err = registry.Get("first.ext1")
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 		_, err = registry.Get("second.ext1")
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 		_, err = registry.Get("third.ext1")
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 	})
 
 	t.Run("Successful reconcile and discovery on Extension update", func(t *testing.T) {
@@ -161,38 +161,38 @@ func TestExtensionReconciler_Reconcile(t *testing.T) {
 
 		// Reconcile the extension and assert discovery has succeeded.
 		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(extensionConfig)})
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 
 		var config runtimev1.ExtensionConfig
 		g.Expect(env.GetAPIReader().Get(ctx, util.ObjectKey(extensionConfig), &config)).To(Succeed())
 
 		// Expect two handlers for the extension and expect the name to be the handler name plus the extension name.
 		handlers := config.Status.Handlers
-		g.Expect(len(handlers)).To(Equal(2))
+		g.Expect(handlers).To(HaveLen(2))
 		g.Expect(handlers[0].Name).To(Equal("first.ext1"))
 		g.Expect(handlers[1].Name).To(Equal("third.ext1"))
 		conditions := config.GetConditions()
-		g.Expect(len(conditions)).To(Equal(1))
+		g.Expect(conditions).To(HaveLen(1))
 		g.Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
 		g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 
 		_, err = registry.Get("first.ext1")
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 		_, err = registry.Get("third.ext1")
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 
 		// Second should not be found in the registry:
 		_, err = registry.Get("second.ext1")
-		g.Expect(err).ToNot(BeNil())
+		g.Expect(err).To(HaveOccurred())
 	})
 	t.Run("Successful reconcile and deregister on ExtensionConfig delete", func(t *testing.T) {
 		g.Expect(env.CleanupAndWait(ctx, extensionConfig)).To(Succeed())
 		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(extensionConfig)})
 		g.Expect(env.Get(ctx, util.ObjectKey(extensionConfig), extensionConfig)).To(Not(Succeed()))
 		_, err = registry.Get("first.ext1")
-		g.Expect(err).ToNot(BeNil())
+		g.Expect(err).To(HaveOccurred())
 		_, err = registry.Get("third.ext1")
-		g.Expect(err).ToNot(BeNil())
+		g.Expect(err).To(HaveOccurred())
 	})
 }
 
@@ -223,17 +223,17 @@ func TestExtensionReconciler_discoverExtensionConfig(t *testing.T) {
 		extensionConfig.Spec.ClientConfig.CABundle = testcerts.CACert
 
 		discoveredExtensionConfig, err := discoverExtensionConfig(ctx, runtimeClient, extensionConfig)
-		g.Expect(err).To(BeNil())
+		g.Expect(err).ToNot(HaveOccurred())
 
 		// Expect exactly one handler and expect the name to be the handler name plus the extension name.
 		handlers := discoveredExtensionConfig.Status.Handlers
-		g.Expect(len(handlers)).To(Equal(1))
+		g.Expect(handlers).To(HaveLen(1))
 		g.Expect(handlers[0].Name).To(Equal("first.ext1"))
 
 		// Expect exactly one condition and expect the condition to have type RuntimeExtensionDiscoveredCondition and
 		// Status true.
 		conditions := discoveredExtensionConfig.GetConditions()
-		g.Expect(len(conditions)).To(Equal(1))
+		g.Expect(conditions).To(HaveLen(1))
 		g.Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
 		g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 	})
@@ -257,16 +257,16 @@ func TestExtensionReconciler_discoverExtensionConfig(t *testing.T) {
 		extensionConfig.Spec.ClientConfig.CABundle = testcerts.CACert
 
 		discoveredExtensionConfig, err := discoverExtensionConfig(ctx, runtimeClient, extensionConfig)
-		g.Expect(err).ToNot(BeNil())
+		g.Expect(err).To(HaveOccurred())
 
 		// Expect exactly one handler and expect the name to be the handler name plus the extension name.
 		handlers := discoveredExtensionConfig.Status.Handlers
-		g.Expect(len(handlers)).To(Equal(0))
+		g.Expect(handlers).To(BeEmpty())
 
 		// Expect exactly one condition and expect the condition to have type RuntimeExtensionDiscoveredCondition and
 		// Status false.
 		conditions := discoveredExtensionConfig.GetConditions()
-		g.Expect(len(conditions)).To(Equal(1))
+		g.Expect(conditions).To(HaveLen(1))
 		g.Expect(conditions[0].Status).To(Equal(corev1.ConditionFalse))
 		g.Expect(conditions[0].Type).To(Equal(runtimev1.RuntimeExtensionDiscoveredCondition))
 	})

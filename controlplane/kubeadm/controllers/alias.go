@@ -30,11 +30,12 @@ import (
 
 // KubeadmControlPlaneReconciler reconciles a KubeadmControlPlane object.
 type KubeadmControlPlaneReconciler struct {
-	Client    client.Client
-	APIReader client.Reader
-	Tracker   *remote.ClusterCacheTracker
+	Client              client.Client
+	SecretCachingClient client.Client
+	Tracker             *remote.ClusterCacheTracker
 
 	EtcdDialTimeout time.Duration
+	EtcdCallTimeout time.Duration
 
 	// WatchFilterValue is the label value used to filter events prior to reconciliation.
 	WatchFilterValue string
@@ -43,10 +44,11 @@ type KubeadmControlPlaneReconciler struct {
 // SetupWithManager sets up the reconciler with the Manager.
 func (r *KubeadmControlPlaneReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return (&kubeadmcontrolplanecontrollers.KubeadmControlPlaneReconciler{
-		Client:           r.Client,
-		APIReader:        r.APIReader,
-		Tracker:          r.Tracker,
-		EtcdDialTimeout:  r.EtcdDialTimeout,
-		WatchFilterValue: r.WatchFilterValue,
+		Client:              r.Client,
+		SecretCachingClient: r.SecretCachingClient,
+		Tracker:             r.Tracker,
+		EtcdDialTimeout:     r.EtcdDialTimeout,
+		EtcdCallTimeout:     r.EtcdCallTimeout,
+		WatchFilterValue:    r.WatchFilterValue,
 	}).SetupWithManager(ctx, mgr, options)
 }

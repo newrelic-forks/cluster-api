@@ -80,6 +80,49 @@ func Test_clusterctlClient_Move(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "returns an error if both move ToDirectory and FromDirectory is set",
+			fields: fields{
+				client: fakeClientForMove(),
+			},
+			args: args{
+				options: MoveOptions{
+					ToDirectory:   "/var/cache/toDirectory",
+					FromDirectory: "/var/cache/fromDirectory",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "returns an error if neither FromDirectory, ToDirectory, or ToKubeconfig is set",
+			fields: fields{
+				client: fakeClientForMove(),
+			},
+			args: args{
+				options: MoveOptions{
+					FromKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
+					FromDirectory:  "",
+					ToDirectory:    "",
+					ToKubeconfig:   Kubeconfig{},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "does not return an error if dryRun but neither FromDirectory, ToDirectory, or ToKubeconfig is set",
+			fields: fields{
+				client: fakeClientForMove(),
+			},
+			args: args{
+				options: MoveOptions{
+					FromKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
+					FromDirectory:  "",
+					ToKubeconfig:   Kubeconfig{},
+					DryRun:         true,
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,12 +134,12 @@ func Test_clusterctlClient_Move(t *testing.T) {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 		})
 	}
 }
 
-func Test_clusterctlClient_Backup(t *testing.T) {
+func Test_clusterctlClient_ToDirectory(t *testing.T) {
 	dir, err := os.MkdirTemp("/tmp", "cluster-api")
 	if err != nil {
 		t.Error(err)
@@ -109,7 +152,7 @@ func Test_clusterctlClient_Backup(t *testing.T) {
 	// These tests are checking the Backup scaffolding
 	// The internal library handles the backup logic and tests can be found there
 	type args struct {
-		options BackupOptions
+		options MoveOptions
 	}
 	tests := []struct {
 		name    string
@@ -123,9 +166,9 @@ func Test_clusterctlClient_Backup(t *testing.T) {
 				client: fakeClientForMove(), // core v1.0.0 (v1.0.1 available), infra v2.0.0 (v2.0.1 available)
 			},
 			args: args{
-				options: BackupOptions{
+				options: MoveOptions{
 					FromKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					Directory:      dir,
+					ToDirectory:    dir,
 				},
 			},
 			wantErr: false,
@@ -136,9 +179,9 @@ func Test_clusterctlClient_Backup(t *testing.T) {
 				client: fakeClientForMove(), // core v1.0.0 (v1.0.1 available), infra v2.0.0 (v2.0.1 available)
 			},
 			args: args{
-				options: BackupOptions{
+				options: MoveOptions{
 					FromKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "does-not-exist"},
-					Directory:      dir,
+					ToDirectory:    dir,
 				},
 			},
 			wantErr: true,
@@ -149,17 +192,17 @@ func Test_clusterctlClient_Backup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			err := tt.fields.client.Backup(tt.args.options)
+			err := tt.fields.client.Move(tt.args.options)
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 		})
 	}
 }
 
-func Test_clusterctlClient_Restore(t *testing.T) {
+func Test_clusterctlClient_FromDirectory(t *testing.T) {
 	dir, err := os.MkdirTemp("/tmp", "cluster-api")
 	if err != nil {
 		t.Error(err)
@@ -172,7 +215,7 @@ func Test_clusterctlClient_Restore(t *testing.T) {
 	// These tests are checking the Restore scaffolding
 	// The internal library handles the restore logic and tests can be found there
 	type args struct {
-		options RestoreOptions
+		options MoveOptions
 	}
 	tests := []struct {
 		name    string
@@ -186,9 +229,9 @@ func Test_clusterctlClient_Restore(t *testing.T) {
 				client: fakeClientForMove(), // core v1.0.0 (v1.0.1 available), infra v2.0.0 (v2.0.1 available)
 			},
 			args: args{
-				options: RestoreOptions{
-					ToKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					Directory:    dir,
+				options: MoveOptions{
+					ToKubeconfig:  Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
+					FromDirectory: dir,
 				},
 			},
 			wantErr: false,
@@ -199,9 +242,9 @@ func Test_clusterctlClient_Restore(t *testing.T) {
 				client: fakeClientForMove(), // core v1.0.0 (v1.0.1 available), infra v2.0.0 (v2.0.1 available)
 			},
 			args: args{
-				options: RestoreOptions{
-					ToKubeconfig: Kubeconfig{Path: "kubeconfig", Context: "does-not-exist"},
-					Directory:    dir,
+				options: MoveOptions{
+					ToKubeconfig:  Kubeconfig{Path: "kubeconfig", Context: "does-not-exist"},
+					FromDirectory: dir,
 				},
 			},
 			wantErr: true,
@@ -212,12 +255,12 @@ func Test_clusterctlClient_Restore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			err := tt.fields.client.Restore(tt.args.options)
+			err := tt.fields.client.Move(tt.args.options)
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 		})
 	}
 }
@@ -250,19 +293,27 @@ func fakeClientForMove() *fakeClient {
 }
 
 type fakeObjectMover struct {
-	moveErr    error
-	backupErr  error
-	restoerErr error
+	moveErr          error
+	toDirectoryErr   error
+	fromDirectoryErr error
 }
 
-func (f *fakeObjectMover) Move(namespace string, toCluster cluster.Client, dryRun bool) error {
+func (f *fakeObjectMover) Move(_ string, _ cluster.Client, _ bool, _ ...cluster.ResourceMutatorFunc) error {
 	return f.moveErr
 }
 
-func (f *fakeObjectMover) Backup(namespace string, directory string) error {
-	return f.backupErr
+func (f *fakeObjectMover) ToDirectory(_ string, _ string) error {
+	return f.toDirectoryErr
 }
 
-func (f *fakeObjectMover) Restore(toCluster cluster.Client, directory string) error {
-	return f.restoerErr
+func (f *fakeObjectMover) Backup(_ string, _ string) error {
+	return f.toDirectoryErr
+}
+
+func (f *fakeObjectMover) FromDirectory(_ cluster.Client, _ string) error {
+	return f.fromDirectoryErr
+}
+
+func (f *fakeObjectMover) Restore(_ cluster.Client, _ string) error {
+	return f.fromDirectoryErr
 }

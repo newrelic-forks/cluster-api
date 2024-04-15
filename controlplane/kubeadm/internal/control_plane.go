@@ -19,15 +19,11 @@ package internal
 import (
 	"context"
 
-	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apiserver/pkg/storage/names"
-	"k8s.io/klog/v2/klogr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -38,9 +34,6 @@ import (
 	"sigs.k8s.io/cluster-api/util/failuredomains"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
-
-// Log is the global logger for the internal package.
-var Log = klogr.New()
 
 // ControlPlane holds business logic around control planes.
 // It should never need to connect to a service, that responsibility lies outside of this struct.
@@ -56,12 +49,15 @@ type ControlPlane struct {
 
 	// TODO: we should see if we can combine these with the Machine objects so we don't have all these separate lookups
 	// See discussion on https://github.com/kubernetes-sigs/cluster-api/pull/3405
-	kubeadmConfigs map[string]*bootstrapv1.KubeadmConfig
-	infraResources map[string]*unstructured.Unstructured
+	KubeadmConfigs map[string]*bootstrapv1.KubeadmConfig
+	InfraResources map[string]*unstructured.Unstructured
+
+	managementCluster ManagementCluster
+	workloadCluster   WorkloadCluster
 }
 
 // NewControlPlane returns an instantiated ControlPlane.
-func NewControlPlane(ctx context.Context, client client.Client, cluster *clusterv1.Cluster, kcp *controlplanev1.KubeadmControlPlane, ownedMachines collections.Machines) (*ControlPlane, error) {
+func NewControlPlane(ctx context.Context, managementCluster ManagementCluster, client client.Client, cluster *clusterv1.Cluster, kcp *controlplanev1.KubeadmControlPlane, ownedMachines collections.Machines) (*ControlPlane, error) {
 	infraObjects, err := getInfraResources(ctx, client, ownedMachines)
 	if err != nil {
 		return nil, err
@@ -84,15 +80,11 @@ func NewControlPlane(ctx context.Context, client client.Client, cluster *cluster
 		Cluster:              cluster,
 		Machines:             ownedMachines,
 		machinesPatchHelpers: patchHelpers,
-		kubeadmConfigs:       kubeadmConfigs,
-		infraResources:       infraObjects,
+		KubeadmConfigs:       kubeadmConfigs,
+		InfraResources:       infraObjects,
 		reconciliationTime:   metav1.Now(),
+		managementCluster:    managementCluster,
 	}, nil
-}
-
-// Logger returns a logger with useful context.
-func (c *ControlPlane) Logger() logr.Logger {
-	return Log.WithValues("namespace", c.KCP.Namespace, "name", c.KCP.Name, "cluster-name", c.Cluster.Name)
 }
 
 // FailureDomains returns a slice of failure domain objects synced from the infrastructure provider into Cluster.Status.
@@ -101,35 +93,6 @@ func (c *ControlPlane) FailureDomains() clusterv1.FailureDomains {
 		return clusterv1.FailureDomains{}
 	}
 	return c.Cluster.Status.FailureDomains
-}
-
-// Version returns the KubeadmControlPlane's version.
-func (c *ControlPlane) Version() *string {
-	return &c.KCP.Spec.Version
-}
-
-// MachineInfrastructureTemplateRef returns the KubeadmControlPlane's infrastructure template for Machines.
-func (c *ControlPlane) MachineInfrastructureTemplateRef() *corev1.ObjectReference {
-	return &c.KCP.Spec.MachineTemplate.InfrastructureRef
-}
-
-// AsOwnerReference returns an owner reference to the KubeadmControlPlane.
-func (c *ControlPlane) AsOwnerReference() *metav1.OwnerReference {
-	return &metav1.OwnerReference{
-		APIVersion: controlplanev1.GroupVersion.String(),
-		Kind:       "KubeadmControlPlane",
-		Name:       c.KCP.Name,
-		UID:        c.KCP.UID,
-	}
-}
-
-// EtcdImageData returns the etcd image data embedded in the ClusterConfiguration or empty strings if none are defined.
-func (c *ControlPlane) EtcdImageData() (string, string) {
-	if c.KCP.Spec.KubeadmConfigSpec.ClusterConfiguration != nil && c.KCP.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local != nil {
-		meta := c.KCP.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageMeta
-		return meta.ImageRepository, meta.ImageTag
-	}
-	return "", ""
 }
 
 // MachineInFailureDomainWithMostMachines returns the first matching failure domain with machines that has the most control-plane machines on it.
@@ -192,91 +155,46 @@ func (c *ControlPlane) JoinControlPlaneConfig() *bootstrapv1.KubeadmConfigSpec {
 	return bootstrapSpec
 }
 
-// GenerateKubeadmConfig generates a new kubeadm config for creating new control plane nodes.
-func (c *ControlPlane) GenerateKubeadmConfig(spec *bootstrapv1.KubeadmConfigSpec) *bootstrapv1.KubeadmConfig {
-	// Create an owner reference without a controller reference because the owning controller is the machine controller
-	owner := metav1.OwnerReference{
-		APIVersion: controlplanev1.GroupVersion.String(),
-		Kind:       "KubeadmControlPlane",
-		Name:       c.KCP.Name,
-		UID:        c.KCP.UID,
-	}
-
-	bootstrapConfig := &bootstrapv1.KubeadmConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
-			Namespace:       c.KCP.Namespace,
-			Labels:          ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
-			Annotations:     c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
-			OwnerReferences: []metav1.OwnerReference{owner},
-		},
-		Spec: *spec,
-	}
-	return bootstrapConfig
-}
-
-// NewMachine returns a machine configured to be a part of the control plane.
-func (c *ControlPlane) NewMachine(infraRef, bootstrapRef *corev1.ObjectReference, failureDomain *string) *clusterv1.Machine {
-	return &clusterv1.Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
-			Namespace:   c.KCP.Namespace,
-			Labels:      ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
-			Annotations: c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(c.KCP, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
-			},
-		},
-		Spec: clusterv1.MachineSpec{
-			ClusterName:       c.Cluster.Name,
-			Version:           c.Version(),
-			InfrastructureRef: *infraRef,
-			Bootstrap: clusterv1.Bootstrap{
-				ConfigRef: bootstrapRef,
-			},
-			FailureDomain: failureDomain,
-		},
-	}
-}
-
-// NeedsReplacementNode determines if the control plane needs to create a replacement node during upgrade.
-func (c *ControlPlane) NeedsReplacementNode() bool {
-	// Can't do anything with an unknown number of desired replicas.
-	if c.KCP.Spec.Replicas == nil {
-		return false
-	}
-	// if the number of existing machines is exactly 1 > than the number of replicas.
-	return len(c.Machines)+1 == int(*c.KCP.Spec.Replicas)
-}
-
 // HasDeletingMachine returns true if any machine in the control plane is in the process of being deleted.
 func (c *ControlPlane) HasDeletingMachine() bool {
 	return len(c.Machines.Filter(collections.HasDeletionTimestamp)) > 0
 }
 
+// GetKubeadmConfig returns the KubeadmConfig of a given machine.
+func (c *ControlPlane) GetKubeadmConfig(machineName string) (*bootstrapv1.KubeadmConfig, bool) {
+	kubeadmConfig, ok := c.KubeadmConfigs[machineName]
+	return kubeadmConfig, ok
+}
+
 // MachinesNeedingRollout return a list of machines that need to be rolled out.
-func (c *ControlPlane) MachinesNeedingRollout() collections.Machines {
+func (c *ControlPlane) MachinesNeedingRollout() (collections.Machines, map[string]string) {
 	// Ignore machines to be deleted.
 	machines := c.Machines.Filter(collections.Not(collections.HasDeletionTimestamp))
 
 	// Return machines if they are scheduled for rollout or if with an outdated configuration.
-	return machines.AnyFilter(
-		// Machines that are scheduled for rollout (KCP.Spec.RolloutAfter set, the RolloutAfter deadline is expired, and the machine was created before the deadline).
-		collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.RolloutAfter),
-		// Machines that do not match with KCP config.
-		collections.Not(MatchesMachineSpec(c.infraResources, c.kubeadmConfigs, c.KCP)),
-	)
+	machinesNeedingRollout := make(collections.Machines, len(machines))
+	rolloutReasons := map[string]string{}
+	for _, m := range machines {
+		reason, needsRollout := NeedsRollout(&c.reconciliationTime, c.KCP.Spec.RolloutAfter, c.KCP.Spec.RolloutBefore, c.InfraResources, c.KubeadmConfigs, c.KCP, m)
+		if needsRollout {
+			machinesNeedingRollout.Insert(m)
+			rolloutReasons[m.Name] = reason
+		}
+	}
+	return machinesNeedingRollout, rolloutReasons
 }
 
 // UpToDateMachines returns the machines that are up to date with the control
 // plane's configuration and therefore do not require rollout.
 func (c *ControlPlane) UpToDateMachines() collections.Machines {
-	return c.Machines.Filter(
-		// Machines that shouldn't be rolled out after the deadline has expired.
-		collections.Not(collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.RolloutAfter)),
-		// Machines that match with KCP config.
-		MatchesMachineSpec(c.infraResources, c.kubeadmConfigs, c.KCP),
-	)
+	upToDateMachines := make(collections.Machines, len(c.Machines))
+	for _, m := range c.Machines {
+		_, needsRollout := NeedsRollout(&c.reconciliationTime, c.KCP.Spec.RolloutAfter, c.KCP.Spec.RolloutBefore, c.InfraResources, c.KubeadmConfigs, c.KCP, m)
+		if !needsRollout {
+			upToDateMachines.Insert(m)
+		}
+	}
+	return upToDateMachines
 }
 
 // getInfraResources fetches the external infrastructure resource for each machine in the collection and returns a map of machine.Name -> infraResource.
@@ -355,4 +273,39 @@ func (c *ControlPlane) PatchMachines(ctx context.Context) error {
 		errList = append(errList, errors.Errorf("failed to get patch helper for machine %s", machine.Name))
 	}
 	return kerrors.NewAggregate(errList)
+}
+
+// SetPatchHelpers updates the patch helpers.
+func (c *ControlPlane) SetPatchHelpers(patchHelpers map[string]*patch.Helper) {
+	if c.machinesPatchHelpers == nil {
+		c.machinesPatchHelpers = map[string]*patch.Helper{}
+	}
+	for machineName, patchHelper := range patchHelpers {
+		c.machinesPatchHelpers[machineName] = patchHelper
+	}
+}
+
+// GetWorkloadCluster builds a cluster object.
+// The cluster comes with an etcd client generator to connect to any etcd pod living on a managed machine.
+func (c *ControlPlane) GetWorkloadCluster(ctx context.Context) (WorkloadCluster, error) {
+	if c.workloadCluster != nil {
+		return c.workloadCluster, nil
+	}
+
+	workloadCluster, err := c.managementCluster.GetWorkloadCluster(ctx, client.ObjectKeyFromObject(c.Cluster))
+	if err != nil {
+		return nil, err
+	}
+	c.workloadCluster = workloadCluster
+	return c.workloadCluster, nil
+}
+
+// InjectTestManagementCluster allows to inject a test ManagementCluster during tests.
+// NOTE: This approach allows to keep the managementCluster field private, which will
+// prevent people from using managementCluster.GetWorkloadCluster because it creates a new
+// instance of WorkloadCluster at every call. People instead should use ControlPlane.GetWorkloadCluster
+// that creates only a single instance of WorkloadCluster for each reconcile.
+func (c *ControlPlane) InjectTestManagementCluster(managementCluster ManagementCluster) {
+	c.managementCluster = managementCluster
+	c.workloadCluster = nil
 }

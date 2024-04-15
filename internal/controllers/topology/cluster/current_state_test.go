@@ -27,11 +27,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/internal/controllers/topology/cluster/scope"
 	"sigs.k8s.io/cluster-api/internal/test/builder"
-	. "sigs.k8s.io/cluster-api/internal/test/matchers"
 )
 
 func TestGetCurrentState(t *testing.T) {
@@ -59,8 +59,14 @@ func TestGetCurrentState(t *testing.T) {
 	// ControlPlane and ControlPlaneInfrastructureMachineTemplate objects.
 	controlPlaneInfrastructureMachineTemplate := builder.InfrastructureMachineTemplate(metav1.NamespaceDefault, "cpInfraTemplate").
 		Build()
+	controlPlaneInfrastructureMachineTemplate.SetLabels(map[string]string{clusterv1.ClusterTopologyOwnedLabel: ""})
+	controlPlaneInfrastructureMachineTemplateNotTopologyOwned := builder.InfrastructureMachineTemplate(metav1.NamespaceDefault, "cpInfraTemplate").
+		Build()
 	controlPlaneTemplateWithInfrastructureMachine := builder.ControlPlaneTemplate(metav1.NamespaceDefault, "cpTemplateWithInfra1").
 		WithInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplate).
+		Build()
+	controlPlaneTemplateWithInfrastructureMachineNotTopologyOwned := builder.ControlPlaneTemplate(metav1.NamespaceDefault, "cpTemplateWithInfra1").
+		WithInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplateNotTopologyOwned).
 		Build()
 	controlPlane := builder.ControlPlane(metav1.NamespaceDefault, "cp1").
 		Build()
@@ -69,7 +75,9 @@ func TestGetCurrentState(t *testing.T) {
 		WithInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplate).
 		Build()
 	controlPlaneWithInfra.SetLabels(map[string]string{clusterv1.ClusterTopologyOwnedLabel: ""})
-
+	controlPlaneWithInfraNotTopologyOwned := builder.ControlPlane(metav1.NamespaceDefault, "cp1").
+		WithInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplateNotTopologyOwned).
+		Build()
 	controlPlaneNotTopologyOwned := builder.ControlPlane(metav1.NamespaceDefault, "cp1").
 		Build()
 
@@ -77,6 +85,10 @@ func TestGetCurrentState(t *testing.T) {
 	clusterClassWithControlPlaneInfra := builder.ClusterClass(metav1.NamespaceDefault, "class1").
 		WithControlPlaneTemplate(controlPlaneTemplateWithInfrastructureMachine).
 		WithControlPlaneInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplate).
+		Build()
+	clusterClassWithControlPlaneInfraNotTopologyOwned := builder.ClusterClass(metav1.NamespaceDefault, "class1").
+		WithControlPlaneTemplate(controlPlaneTemplateWithInfrastructureMachineNotTopologyOwned).
+		WithControlPlaneInfrastructureMachineTemplate(controlPlaneInfrastructureMachineTemplateNotTopologyOwned).
 		Build()
 	clusterClassWithNoControlPlaneInfra := builder.ClusterClass(metav1.NamespaceDefault, "class2").
 		Build()
@@ -86,14 +98,25 @@ func TestGetCurrentState(t *testing.T) {
 
 	machineDeploymentInfrastructure := builder.InfrastructureMachineTemplate(metav1.NamespaceDefault, "infra1").
 		Build()
+	machineDeploymentInfrastructure.SetLabels(map[string]string{clusterv1.ClusterTopologyOwnedLabel: ""})
 	machineDeploymentBootstrap := builder.BootstrapTemplate(metav1.NamespaceDefault, "bootstrap1").
 		Build()
+	machineDeploymentBootstrap.SetLabels(map[string]string{clusterv1.ClusterTopologyOwnedLabel: ""})
 
 	machineDeployment := builder.MachineDeployment(metav1.NamespaceDefault, "md1").
 		WithLabels(map[string]string{
-			clusterv1.ClusterLabelName:                          "cluster1",
+			clusterv1.ClusterNameLabel:                          "cluster1",
 			clusterv1.ClusterTopologyOwnedLabel:                 "",
-			clusterv1.ClusterTopologyMachineDeploymentLabelName: "md1",
+			clusterv1.ClusterTopologyMachineDeploymentNameLabel: "md1",
+		}).
+		WithBootstrapTemplate(machineDeploymentBootstrap).
+		WithInfrastructureTemplate(machineDeploymentInfrastructure).
+		Build()
+	machineDeployment2 := builder.MachineDeployment(metav1.NamespaceDefault, "md2").
+		WithLabels(map[string]string{
+			clusterv1.ClusterNameLabel:                          "cluster1",
+			clusterv1.ClusterTopologyOwnedLabel:                 "",
+			clusterv1.ClusterTopologyMachineDeploymentNameLabel: "md2",
 		}).
 		WithBootstrapTemplate(machineDeploymentBootstrap).
 		WithInfrastructureTemplate(machineDeploymentInfrastructure).
@@ -390,6 +413,25 @@ func TestGetCurrentState(t *testing.T) {
 			},
 		},
 		{
+			name: "Fails if the ControlPlane references an InfrastructureMachineTemplate that is not topology owned",
+			cluster: builder.Cluster(metav1.NamespaceDefault, "cluster1").
+				// No InfrastructureCluster!
+				WithControlPlane(controlPlaneWithInfraNotTopologyOwned).
+				Build(),
+			blueprint: &scope.ClusterBlueprint{
+				ClusterClass: clusterClassWithControlPlaneInfraNotTopologyOwned,
+				ControlPlane: &scope.ControlPlaneBlueprint{
+					Template:                      controlPlaneTemplateWithInfrastructureMachine,
+					InfrastructureMachineTemplate: controlPlaneInfrastructureMachineTemplate,
+				},
+			},
+			objects: []client.Object{
+				controlPlaneWithInfraNotTopologyOwned,
+				controlPlaneInfrastructureMachineTemplateNotTopologyOwned,
+			},
+			wantErr: true,
+		},
+		{
 			name: "Fails if the ControlPlane references an InfrastructureMachineTemplate that does not exist",
 			cluster: builder.Cluster(metav1.NamespaceDefault, "cluster1").
 				WithControlPlane(controlPlane).
@@ -418,7 +460,7 @@ func TestGetCurrentState(t *testing.T) {
 				clusterClassWithControlPlaneInfra,
 				builder.MachineDeployment(metav1.NamespaceDefault, "no-managed-label").
 					WithLabels(map[string]string{
-						clusterv1.ClusterLabelName: "cluster1",
+						clusterv1.ClusterNameLabel: "cluster1",
 						// topology.cluster.x-k8s.io/owned label is missing (unmanaged)!
 					}).
 					WithBootstrapTemplate(machineDeploymentBootstrap).
@@ -426,9 +468,9 @@ func TestGetCurrentState(t *testing.T) {
 					Build(),
 				builder.MachineDeployment(metav1.NamespaceDefault, "wrong-cluster-label").
 					WithLabels(map[string]string{
-						clusterv1.ClusterLabelName:                          "another-cluster",
+						clusterv1.ClusterNameLabel:                          "another-cluster",
 						clusterv1.ClusterTopologyOwnedLabel:                 "",
-						clusterv1.ClusterTopologyMachineDeploymentLabelName: "md1",
+						clusterv1.ClusterTopologyMachineDeploymentNameLabel: "md1",
 					}).
 					WithBootstrapTemplate(machineDeploymentBootstrap).
 					WithInfrastructureTemplate(machineDeploymentInfrastructure).
@@ -452,7 +494,7 @@ func TestGetCurrentState(t *testing.T) {
 				clusterClassWithControlPlaneInfra,
 				builder.MachineDeployment(metav1.NamespaceDefault, "missing-topology-md-labelName").
 					WithLabels(map[string]string{
-						clusterv1.ClusterLabelName:          "cluster1",
+						clusterv1.ClusterNameLabel:          "cluster1",
 						clusterv1.ClusterTopologyOwnedLabel: "",
 						// topology.cluster.x-k8s.io/deployment-name label is missing!
 					}).
@@ -460,7 +502,7 @@ func TestGetCurrentState(t *testing.T) {
 					WithInfrastructureTemplate(machineDeploymentInfrastructure).
 					Build(),
 			},
-			// Expect error to be thrown as no managed MachineDeployment is reconcilable unless it has a ClusterTopologyMachineDeploymentLabelName.
+			// Expect error to be thrown as no managed MachineDeployment is reconcilable unless it has a ClusterTopologyMachineDeploymentNameLabel.
 			wantErr: true,
 		},
 		{
@@ -793,7 +835,7 @@ func TestGetCurrentState(t *testing.T) {
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 			if tt.want == nil {
 				g.Expect(got).To(BeNil())

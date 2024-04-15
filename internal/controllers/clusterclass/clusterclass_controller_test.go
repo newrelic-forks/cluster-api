@@ -19,16 +19,29 @@ package clusterclass
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	utilfeature "k8s.io/component-base/featuregate/testing"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	runtimev1 "sigs.k8s.io/cluster-api/exp/runtime/api/v1alpha1"
+	runtimecatalog "sigs.k8s.io/cluster-api/exp/runtime/catalog"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1"
+	"sigs.k8s.io/cluster-api/feature"
 	tlog "sigs.k8s.io/cluster-api/internal/log"
+	fakeruntimeclient "sigs.k8s.io/cluster-api/internal/runtime/client/fake"
 	"sigs.k8s.io/cluster-api/internal/test/builder"
 )
 
@@ -37,7 +50,7 @@ func TestClusterClassReconciler_reconcile(t *testing.T) {
 	timeout := 30 * time.Second
 
 	ns, err := env.CreateNamespace(ctx, "test-topology-clusterclass-reconciler")
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 
 	clusterClassName := "class1"
 	workerClassName1 := "linux-worker-1"
@@ -75,6 +88,24 @@ func TestClusterClassReconciler_reconcile(t *testing.T) {
 		WithControlPlaneTemplate(controlPlaneTemplate).
 		WithControlPlaneInfrastructureMachineTemplate(infraMachineTemplateControlPlane).
 		WithWorkerMachineDeploymentClasses(*machineDeploymentClass1, *machineDeploymentClass2).
+		WithVariables(
+			clusterv1.ClusterClassVariable{
+				Name:     "hdd",
+				Required: true,
+				Schema: clusterv1.VariableSchema{
+					OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+						Type: "string",
+					},
+				},
+			},
+			clusterv1.ClusterClassVariable{
+				Name: "cpu",
+				Schema: clusterv1.VariableSchema{
+					OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+						Type: "integer",
+					},
+				},
+			}).
 		Build()
 
 	// Create the set of initObjects from the objects above to add to the API server when the test environment starts.
@@ -106,10 +137,44 @@ func TestClusterClassReconciler_reconcile(t *testing.T) {
 
 		g.Expect(assertMachineDeploymentClasses(ctx, actualClusterClass, ns)).Should(Succeed())
 
+		g.Expect(assertStatusVariables(actualClusterClass)).Should(Succeed())
 		return nil
 	}, timeout).Should(Succeed())
 }
 
+func assertStatusVariables(actualClusterClass *clusterv1.ClusterClass) error {
+	// Assert that each inline variable definition has been exposed in the ClusterClass status.
+	for _, specVar := range actualClusterClass.Spec.Variables {
+		var found bool
+		for _, statusVar := range actualClusterClass.Status.Variables {
+			if specVar.Name != statusVar.Name {
+				continue
+			}
+			found = true
+			if statusVar.DefinitionsConflict {
+				return errors.Errorf("ClusterClass status %s variable DefinitionsConflict does not match. Expected %v , got %v", specVar.Name, false, statusVar.DefinitionsConflict)
+			}
+			if len(statusVar.Definitions) != 1 {
+				return errors.Errorf("ClusterClass status has multiple definitions for variable %s. Expected a single definition", specVar.Name)
+			}
+			// For this test assume there is only one status variable definition, and that it should match the spec.
+			statusVarDefinition := statusVar.Definitions[0]
+			if statusVarDefinition.From != clusterv1.VariableDefinitionFromInline {
+				return errors.Errorf("ClusterClass status variable %s from field does not match. Expected %s. Got %s", statusVar.Name, clusterv1.VariableDefinitionFromInline, statusVarDefinition.From)
+			}
+			if specVar.Required != statusVarDefinition.Required {
+				return errors.Errorf("ClusterClass status variable %s required field does not match. Expecte %v. Got %v", specVar.Name, statusVarDefinition.Required, statusVarDefinition.Required)
+			}
+			if !reflect.DeepEqual(specVar.Schema, statusVarDefinition.Schema) {
+				return errors.Errorf("ClusterClass status variable %s schema does not match. Expected %v. Got %v", specVar.Name, specVar.Schema, statusVarDefinition.Schema)
+			}
+		}
+		if !found {
+			return errors.Errorf("ClusterClass does not have status for variable %s", specVar.Name)
+		}
+	}
+	return nil
+}
 func assertInfrastructureClusterTemplate(ctx context.Context, actualClusterClass *clusterv1.ClusterClass, ns *corev1.Namespace) error {
 	// Assert the infrastructure cluster template has the correct owner reference.
 	actualInfraClusterTemplate := builder.InfrastructureClusterTemplate("", "").Build()
@@ -125,13 +190,9 @@ func assertInfrastructureClusterTemplate(ctx context.Context, actualClusterClass
 	}
 
 	// Assert the ClusterClass has the expected APIVersion and Kind of to the infrastructure cluster template
-	if err := referenceExistsWithCorrectKindAndAPIVersion(actualClusterClass.Spec.Infrastructure.Ref,
+	return referenceExistsWithCorrectKindAndAPIVersion(actualClusterClass.Spec.Infrastructure.Ref,
 		builder.GenericInfrastructureClusterTemplateKind,
-		builder.InfrastructureGroupVersion); err != nil {
-		return err
-	}
-
-	return nil
+		builder.InfrastructureGroupVersion)
 }
 
 func assertControlPlaneTemplate(ctx context.Context, actualClusterClass *clusterv1.ClusterClass, ns *corev1.Namespace) error {
@@ -224,13 +285,9 @@ func assertMachineDeploymentClass(ctx context.Context, actualClusterClass *clust
 	}
 
 	// Assert the MachineDeploymentClass has the expected APIVersion and Kind to the bootstrap template
-	if err := referenceExistsWithCorrectKindAndAPIVersion(mdClass.Template.Bootstrap.Ref,
+	return referenceExistsWithCorrectKindAndAPIVersion(mdClass.Template.Bootstrap.Ref,
 		builder.GenericBootstrapConfigTemplateKind,
-		builder.BootstrapGroupVersion); err != nil {
-		return err
-	}
-
-	return nil
+		builder.BootstrapGroupVersion)
 }
 
 func assertHasOwnerReference(obj client.Object, ownerRef metav1.OwnerReference) error {
@@ -261,4 +318,302 @@ func isOwnerReferenceEqual(a, b metav1.OwnerReference) bool {
 		return false
 	}
 	return true
+}
+
+func TestReconciler_reconcileVariables(t *testing.T) {
+	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, feature.RuntimeSDK, true)()
+
+	g := NewWithT(t)
+	catalog := runtimecatalog.New()
+	_ = runtimehooksv1.AddToCatalog(catalog)
+
+	clusterClassWithInlineVariables := builder.ClusterClass(metav1.NamespaceDefault, "class1").
+		WithVariables(
+			[]clusterv1.ClusterClassVariable{
+				{
+					Name: "cpu",
+					Schema: clusterv1.VariableSchema{
+						OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+							Type: "integer",
+						},
+					},
+				},
+				{
+					Name: "memory",
+					Schema: clusterv1.VariableSchema{
+						OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+							Type: "string",
+						},
+					},
+				},
+			}...,
+		)
+	tests := []struct {
+		name          string
+		clusterClass  *clusterv1.ClusterClass
+		want          []clusterv1.ClusterClassStatusVariable
+		patchResponse *runtimehooksv1.DiscoverVariablesResponse
+		wantErr       bool
+	}{
+		{
+			name:         "Reconcile inline variables to ClusterClass status",
+			clusterClass: clusterClassWithInlineVariables.DeepCopy().Build(),
+			want: []clusterv1.ClusterClassStatusVariable{
+				{
+					Name: "cpu",
+					Definitions: []clusterv1.ClusterClassStatusVariableDefinition{
+						{
+							From: clusterv1.VariableDefinitionFromInline,
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "integer",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "memory",
+					Definitions: []clusterv1.ClusterClassStatusVariableDefinition{
+						{
+							From: clusterv1.VariableDefinitionFromInline,
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "string",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Reconcile variables from inline and external variables to ClusterClass status",
+			clusterClass: clusterClassWithInlineVariables.DeepCopy().WithPatches(
+				[]clusterv1.ClusterClassPatch{
+					{
+						Name: "patch1",
+						External: &clusterv1.ExternalPatchDefinition{
+							DiscoverVariablesExtension: pointer.String("variables-one"),
+						}}}).
+				Build(),
+			patchResponse: &runtimehooksv1.DiscoverVariablesResponse{
+				CommonResponse: runtimehooksv1.CommonResponse{
+					Status: runtimehooksv1.ResponseStatusSuccess,
+				},
+				Variables: []clusterv1.ClusterClassVariable{
+					{
+						Name: "cpu",
+						Schema: clusterv1.VariableSchema{
+							OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+								Type: "string",
+							},
+						},
+					},
+					{
+						Name: "memory",
+						Schema: clusterv1.VariableSchema{
+							OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+								Type: "string",
+							},
+						},
+					},
+					{
+						Name: "location",
+						Schema: clusterv1.VariableSchema{
+							OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+								Type: "string",
+							},
+						},
+					},
+				},
+			},
+			want: []clusterv1.ClusterClassStatusVariable{
+				{
+					Name:                "cpu",
+					DefinitionsConflict: true,
+					Definitions: []clusterv1.ClusterClassStatusVariableDefinition{
+						{
+							From: clusterv1.VariableDefinitionFromInline,
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "integer",
+								},
+							},
+						},
+						{
+							From: "patch1",
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "string",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:                "location",
+					DefinitionsConflict: false,
+					Definitions: []clusterv1.ClusterClassStatusVariableDefinition{
+						{
+							From: "patch1",
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "string",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:                "memory",
+					DefinitionsConflict: false,
+					Definitions: []clusterv1.ClusterClassStatusVariableDefinition{
+						{
+							From: clusterv1.VariableDefinitionFromInline,
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "string",
+								},
+							},
+						},
+						{
+							From: "patch1",
+							Schema: clusterv1.VariableSchema{
+								OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+									Type: "string",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:    "Error if external patch defines a variable with same name multiple times",
+			wantErr: true,
+			clusterClass: clusterClassWithInlineVariables.DeepCopy().WithPatches(
+				[]clusterv1.ClusterClassPatch{
+					{
+						Name: "patch1",
+						External: &clusterv1.ExternalPatchDefinition{
+							DiscoverVariablesExtension: pointer.String("variables-one"),
+						}}}).
+				Build(),
+			patchResponse: &runtimehooksv1.DiscoverVariablesResponse{
+				CommonResponse: runtimehooksv1.CommonResponse{
+					Status: runtimehooksv1.ResponseStatusSuccess,
+				},
+				Variables: []clusterv1.ClusterClassVariable{
+					{
+						Name: "cpu",
+						Schema: clusterv1.VariableSchema{
+							OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+								Type: "string",
+							},
+						},
+					},
+					{
+						Name: "cpu",
+						Schema: clusterv1.VariableSchema{
+							OpenAPIV3Schema: clusterv1.JSONSchemaProps{
+								Type: "integer",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeRuntimeClient := fakeruntimeclient.NewRuntimeClientBuilder().
+				WithCallExtensionResponses(
+					map[string]runtimehooksv1.ResponseObject{
+						"variables-one": tt.patchResponse,
+					}).
+				WithCatalog(catalog).
+				Build()
+
+			r := &Reconciler{
+				RuntimeClient: fakeRuntimeClient,
+			}
+
+			err := r.reconcileVariables(ctx, tt.clusterClass)
+			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(tt.clusterClass.Status.Variables).To(Equal(tt.want), cmp.Diff(tt.clusterClass.Status.Variables, tt.want))
+		})
+	}
+}
+
+func TestReconciler_extensionConfigToClusterClass(t *testing.T) {
+	firstExtConfig := &runtimev1.ExtensionConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "runtime1",
+		},
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ExtensionConfig",
+			APIVersion: runtimev1.GroupVersion.String(),
+		},
+		Spec: runtimev1.ExtensionConfigSpec{
+			NamespaceSelector: &metav1.LabelSelector{},
+		},
+	}
+	secondExtConfig := &runtimev1.ExtensionConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "runtime2",
+		},
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ExtensionConfig",
+			APIVersion: runtimev1.GroupVersion.String(),
+		},
+		Spec: runtimev1.ExtensionConfigSpec{
+			NamespaceSelector: &metav1.LabelSelector{},
+		},
+	}
+
+	// These ClusterClasses will be reconciled as they both reference the passed ExtensionConfig `runtime1`.
+	onePatchClusterClass := builder.ClusterClass(metav1.NamespaceDefault, "cc1").
+		WithPatches([]clusterv1.ClusterClassPatch{
+			{External: &clusterv1.ExternalPatchDefinition{DiscoverVariablesExtension: pointer.String("discover-variables.runtime1")}}}).
+		Build()
+	twoPatchClusterClass := builder.ClusterClass(metav1.NamespaceDefault, "cc2").
+		WithPatches([]clusterv1.ClusterClassPatch{
+			{External: &clusterv1.ExternalPatchDefinition{DiscoverVariablesExtension: pointer.String("discover-variables.runtime1")}},
+			{External: &clusterv1.ExternalPatchDefinition{DiscoverVariablesExtension: pointer.String("discover-variables.runtime2")}}}).
+		Build()
+
+	// This ClusterClasses will not be reconciled as it does not reference the passed ExtensionConfig `runtime1`.
+	notReconciledClusterClass := builder.ClusterClass(metav1.NamespaceDefault, "cc3").
+		WithPatches([]clusterv1.ClusterClassPatch{
+			{External: &clusterv1.ExternalPatchDefinition{DiscoverVariablesExtension: pointer.String("discover-variables.other-runtime-class")}}}).
+		Build()
+
+	t.Run("test", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithObjects(onePatchClusterClass, notReconciledClusterClass, twoPatchClusterClass).Build()
+		r := &Reconciler{
+			Client: fakeClient,
+		}
+
+		// Expect both onePatchClusterClass and twoPatchClusterClass to trigger a reconcile as both reference ExtensionCopnfig `runtime1`.
+		firstExtConfigExpected := []reconcile.Request{
+			{NamespacedName: types.NamespacedName{Namespace: onePatchClusterClass.Namespace, Name: onePatchClusterClass.Name}},
+			{NamespacedName: types.NamespacedName{Namespace: twoPatchClusterClass.Namespace, Name: twoPatchClusterClass.Name}},
+		}
+		if got := r.extensionConfigToClusterClass(context.Background(), firstExtConfig); !reflect.DeepEqual(got, firstExtConfigExpected) {
+			t.Errorf("extensionConfigToClusterClass() = %v, want %v", got, firstExtConfigExpected)
+		}
+
+		// Expect only twoPatchClusterClass to trigger a reconcile as it's the only class with a reference to ExtensionCopnfig `runtime2`.
+		secondExtConfigExpected := []reconcile.Request{
+			{NamespacedName: types.NamespacedName{Namespace: twoPatchClusterClass.Namespace, Name: twoPatchClusterClass.Name}},
+		}
+		if got := r.extensionConfigToClusterClass(context.Background(), secondExtConfig); !reflect.DeepEqual(got, secondExtConfigExpected) {
+			t.Errorf("extensionConfigToClusterClass() = %v, want %v", got, secondExtConfigExpected)
+		}
+	})
 }

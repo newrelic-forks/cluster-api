@@ -45,7 +45,7 @@ func TestMachinePoolDefault(t *testing.T) {
 			Template: clusterv1.MachineTemplateSpec{
 				Spec: clusterv1.MachineSpec{
 					Bootstrap: clusterv1.Bootstrap{ConfigRef: &corev1.ObjectReference{}},
-					Version:   pointer.StringPtr("1.20.0"),
+					Version:   pointer.String("1.20.0"),
 				},
 			},
 		},
@@ -53,12 +53,12 @@ func TestMachinePoolDefault(t *testing.T) {
 	t.Run("for MachinePool", utildefaulting.DefaultValidateTest(m))
 	m.Default()
 
-	g.Expect(m.Labels[clusterv1.ClusterLabelName]).To(Equal(m.Spec.ClusterName))
-	g.Expect(m.Spec.Replicas).To(Equal(pointer.Int32Ptr(1)))
-	g.Expect(m.Spec.MinReadySeconds).To(Equal(pointer.Int32Ptr(0)))
+	g.Expect(m.Labels[clusterv1.ClusterNameLabel]).To(Equal(m.Spec.ClusterName))
+	g.Expect(m.Spec.Replicas).To(Equal(pointer.Int32(1)))
+	g.Expect(m.Spec.MinReadySeconds).To(Equal(pointer.Int32(0)))
 	g.Expect(m.Spec.Template.Spec.Bootstrap.ConfigRef.Namespace).To(Equal(m.Namespace))
 	g.Expect(m.Spec.Template.Spec.InfrastructureRef.Namespace).To(Equal(m.Namespace))
-	g.Expect(m.Spec.Template.Spec.Version).To(Equal(pointer.StringPtr("v1.20.0")))
+	g.Expect(m.Spec.Template.Spec.Version).To(Equal(pointer.String("v1.20.0")))
 }
 
 func TestMachinePoolBootstrapValidation(t *testing.T) {
@@ -77,7 +77,7 @@ func TestMachinePoolBootstrapValidation(t *testing.T) {
 		},
 		{
 			name:      "should not return error if dataSecretName is set",
-			bootstrap: clusterv1.Bootstrap{ConfigRef: nil, DataSecretName: pointer.StringPtr("test")},
+			bootstrap: clusterv1.Bootstrap{ConfigRef: nil, DataSecretName: pointer.String("test")},
 			expectErr: false,
 		},
 		{
@@ -99,12 +99,21 @@ func TestMachinePoolBootstrapValidation(t *testing.T) {
 					},
 				},
 			}
+
 			if tt.expectErr {
-				g.Expect(m.ValidateCreate()).NotTo(Succeed())
-				g.Expect(m.ValidateUpdate(m)).NotTo(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			} else {
-				g.Expect(m.ValidateCreate()).To(Succeed())
-				g.Expect(m.ValidateUpdate(m)).To(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			}
 		})
 	}
@@ -168,11 +177,19 @@ func TestMachinePoolNamespaceValidation(t *testing.T) {
 			}
 
 			if tt.expectErr {
-				g.Expect(m.ValidateCreate()).NotTo(Succeed())
-				g.Expect(m.ValidateUpdate(m)).NotTo(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			} else {
-				g.Expect(m.ValidateCreate()).To(Succeed())
-				g.Expect(m.ValidateUpdate(m)).To(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			}
 		})
 	}
@@ -228,11 +245,13 @@ func TestMachinePoolClusterNameImmutable(t *testing.T) {
 				},
 			}
 
+			warnings, err := newMP.ValidateUpdate(oldMP)
 			if tt.expectErr {
-				g.Expect(newMP.ValidateUpdate(oldMP)).NotTo(Succeed())
+				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(newMP.ValidateUpdate(oldMP)).To(Succeed())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
+			g.Expect(warnings).To(BeEmpty())
 		})
 	}
 }
@@ -284,11 +303,19 @@ func TestMachinePoolVersionValidation(t *testing.T) {
 			}
 
 			if tt.expectErr {
-				g.Expect(m.ValidateCreate()).NotTo(Succeed())
-				g.Expect(m.ValidateUpdate(m)).NotTo(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			} else {
-				g.Expect(m.ValidateCreate()).To(Succeed())
-				g.Expect(m.ValidateUpdate(m)).To(Succeed())
+				warnings, err := m.ValidateCreate()
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
+				warnings, err = m.ValidateUpdate(m)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(warnings).To(BeEmpty())
 			}
 		})
 	}

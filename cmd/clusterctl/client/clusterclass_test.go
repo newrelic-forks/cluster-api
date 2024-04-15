@@ -72,7 +72,7 @@ func TestClusterClassExists(t *testing.T) {
 			c, _ := client.Proxy().NewClient()
 
 			actual, err := clusterClassExists(c, tt.clusterClass, metav1.NamespaceDefault)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(actual).To(Equal(tt.want))
 		})
 	}
@@ -258,10 +258,10 @@ func (cm *clusterClassMatcher) Match(actual interface{}) (bool, error) {
 	return true, nil
 }
 
-func (cm *clusterClassMatcher) FailureMessage(actual interface{}) string {
+func (cm *clusterClassMatcher) FailureMessage(_ interface{}) string {
 	return fmt.Sprintf("Expected ClusterClass of name %v in namespace %v to be present", cm.name, cm.namespace)
 }
 
-func (cm *clusterClassMatcher) NegatedFailureMessage(actual interface{}) string {
+func (cm *clusterClassMatcher) NegatedFailureMessage(_ interface{}) string {
 	return fmt.Sprintf("Expected ClusterClass of name %v in namespace %v not to be present", cm.name, cm.namespace)
 }

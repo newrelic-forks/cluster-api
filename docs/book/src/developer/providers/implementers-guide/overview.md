@@ -27,6 +27,9 @@ brew install kubernetes-cli
 
 # Install kustomize
 brew install kustomize
+
+# Install Kubebuilder
+brew install kubebuilder
 ```
 {{#/tab }}
 {{#tab Linux}}
@@ -39,18 +42,28 @@ curl -fLO https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl
 # Install kustomize
 curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
 chmod +x ./kustomize && sudo mv ./kustomize /usr/local/bin/kustomize
+<<<<<<< HEAD
+=======
+
+# Install Kubebuilder
+curl -sLo kubebuilder https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)
+chmod +x ./kubebuilder && sudo mv ./kubebuilder /usr/local/bin/kubebuilder
+>>>>>>> v1.5.7
 ```
 
 {{#/tab }}
 {{#/tabs }}
 
+<<<<<<< HEAD
 ```bash
 # Install Kubebuilder
 curl -sLo kubebuilder https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)
 chmod +x ./kubebuilder && sudo mv ./kubebuilder /usr/local/bin/kubebuilder
 ```
 
+=======
+>>>>>>> v1.5.7
 [kubebuilder-book]: https://book.kubebuilder.io/
-[kubectl-install]: http://kubernetes.io/docs/user-guide/prereqs/
+[kubectl-install]: https://kubernetes.io/docs/tasks/tools/#kubectl
 [install-kustomize]: https://kubectl.docs.kubernetes.io/installation/kustomize/
 [install-kubebuilder]:  https://book.kubebuilder.io/quick-start.html#installation

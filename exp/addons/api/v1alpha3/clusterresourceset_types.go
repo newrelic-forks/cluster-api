@@ -111,10 +111,14 @@ func (m *ClusterResourceSet) SetConditions(conditions clusterv1alpha3.Conditions
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:unservedversion
+// +kubebuilder:deprecatedversion
 // +kubebuilder:resource:path=clusterresourcesets,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 
 // ClusterResourceSet is the Schema for the clusterresourcesets API.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type ClusterResourceSet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -126,6 +130,8 @@ type ClusterResourceSet struct {
 // +kubebuilder:object:root=true
 
 // ClusterResourceSetList contains a list of ClusterResourceSet.
+//
+// Deprecated: This type will be removed in one of the next releases.
 type ClusterResourceSetList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

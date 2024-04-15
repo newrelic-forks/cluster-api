@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client"
@@ -41,18 +42,20 @@ type generateClusterOptions struct {
 	configMapDataKey   string
 
 	listVariables bool
+
+	output string
 }
 
 var gc = &generateClusterOptions{}
 
 var generateClusterClusterCmd = &cobra.Command{
-	Use:   "cluster",
-	Short: "Generate templates for creating workload clusters.",
+	Use:   "cluster NAME",
+	Short: "Generate templates for creating workload clusters",
 	Long: LongDesc(`
 		Generate templates for creating workload clusters.
 
 		clusterctl ships with a list of known providers; if necessary, edit
-		$HOME/.cluster-api/clusterctl.yaml to add new provider or to customize existing ones.
+		$XDG_CONFIG_HOME/cluster-api/clusterctl.yaml to add new provider or to customize existing ones.
 
 		Each provider configuration links to a repository; clusterctl uses this information
 		to fetch templates when creating a new cluster.`),
@@ -88,7 +91,12 @@ var generateClusterClusterCmd = &cobra.Command{
 		# Prints the list of variables required by the yaml file for creating workload cluster.
 		clusterctl generate cluster my-cluster --list-variables`),
 
-	Args: cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 {
+			return errors.New("please specify a cluster name")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runGenerateClusterTemplate(cmd, args[0])
 	},
@@ -104,7 +112,7 @@ func init() {
 	generateClusterClusterCmd.Flags().StringVarP(&gc.targetNamespace, "target-namespace", "n", "",
 		"The namespace to use for the workload cluster. If unspecified, the current namespace will be used.")
 	generateClusterClusterCmd.Flags().StringVar(&gc.kubernetesVersion, "kubernetes-version", "",
-		"The Kubernetes version to use for the workload cluster. If unspecified, the value from OS environment variables or the .cluster-api/clusterctl.yaml config file will be used.")
+		"The Kubernetes version to use for the workload cluster. If unspecified, the value from OS environment variables or the $XDG_CONFIG_HOME/cluster-api/clusterctl.yaml config file will be used.")
 	generateClusterClusterCmd.Flags().Int64Var(&gc.controlPlaneMachineCount, "control-plane-machine-count", 1,
 		"The number of control plane machines for the workload cluster.")
 	generateClusterClusterCmd.Flags().Int64Var(&gc.workerMachineCount, "worker-machine-count", 0,
@@ -118,7 +126,7 @@ func init() {
 
 	// flags for the url source
 	generateClusterClusterCmd.Flags().StringVar(&gc.url, "from", "",
-		"The URL to read the workload cluster template from. If unspecified, the infrastructure provider repository URL will be used")
+		"The URL to read the workload cluster template from. If unspecified, the infrastructure provider repository URL will be used. If set to '-', the workload cluster template is read from stdin.")
 
 	// flags for the config map source
 	generateClusterClusterCmd.Flags().StringVar(&gc.configMapName, "from-config-map", "",
@@ -131,6 +139,7 @@ func init() {
 	// other flags
 	generateClusterClusterCmd.Flags().BoolVar(&gc.listVariables, "list-variables", false,
 		"Returns the list of variables expected by the template instead of the template yaml")
+	generateClusterClusterCmd.Flags().StringVar(&gc.output, "write-to", "", "Specify the output file to write the template to, defaults to STDOUT if the flag is not set")
 
 	generateCmd.AddCommand(generateClusterClusterCmd)
 }
@@ -186,5 +195,5 @@ func runGenerateClusterTemplate(cmd *cobra.Command, name string) error {
 		return printVariablesOutput(template, templateOptions)
 	}
 
-	return printYamlOutput(template)
+	return printYamlOutput(template, gc.output)
 }

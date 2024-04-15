@@ -39,8 +39,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/api/v1beta1/index"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/internal/test/builder"
+	"sigs.k8s.io/cluster-api/internal/util/ssa"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -100,15 +102,15 @@ func TestWatches(t *testing.T) {
 			Namespace: ns.Name,
 		},
 		Spec: corev1.NodeSpec{
-			ProviderID: "test:///id-1",
+			ProviderID: "test://id-1",
 		},
 	}
 
-	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
+	g.Expect(env.Create(ctx, testCluster)).To(Succeed())
 	g.Expect(env.CreateKubeconfigSecret(ctx, testCluster)).To(Succeed())
-	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(Succeed())
 	g.Expect(env.Create(ctx, node)).To(Succeed())
-	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, infraMachine)).To(Succeed())
 
 	defer func(do ...client.Object) {
 		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
@@ -132,7 +134,7 @@ func TestWatches(t *testing.T) {
 			GenerateName: "machine-created-",
 			Namespace:    ns.Name,
 			Labels: map[string]string{
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 		},
 		Spec: clusterv1.MachineSpec{
@@ -151,7 +153,7 @@ func TestWatches(t *testing.T) {
 			}},
 	}
 
-	g.Expect(env.Create(ctx, machine)).To(BeNil())
+	g.Expect(env.Create(ctx, machine)).To(Succeed())
 	defer func() {
 		g.Expect(env.Cleanup(ctx, machine)).To(Succeed())
 	}()
@@ -221,9 +223,9 @@ func TestMachine_Reconcile(t *testing.T) {
 		},
 	}
 
-	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
-	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
-	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, testCluster)).To(Succeed())
+	g.Expect(env.Create(ctx, infraMachine)).To(Succeed())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(Succeed())
 
 	defer func(do ...client.Object) {
 		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
@@ -255,7 +257,7 @@ func TestMachine_Reconcile(t *testing.T) {
 			},
 		},
 	}
-	g.Expect(env.Create(ctx, machine)).To(BeNil())
+	g.Expect(env.Create(ctx, machine)).To(Succeed())
 
 	key := client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}
 
@@ -269,7 +271,7 @@ func TestMachine_Reconcile(t *testing.T) {
 
 	// Set bootstrap ready.
 	bootstrapPatch := client.MergeFrom(defaultBootstrap.DeepCopy())
-	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, true, "status", "ready")).NotTo(HaveOccurred())
+	g.Expect(unstructured.SetNestedField(defaultBootstrap.Object, true, "status", "ready")).ToNot(HaveOccurred())
 	g.Expect(env.Status().Patch(ctx, defaultBootstrap, bootstrapPatch)).To(Succeed())
 
 	// Set infrastructure ready.
@@ -282,14 +284,14 @@ func TestMachine_Reconcile(t *testing.T) {
 		if err := env.Get(ctx, key, machine); err != nil {
 			return false
 		}
-		if conditions.Has(machine, clusterv1.InfrastructureReadyCondition) != true {
+		if !conditions.Has(machine, clusterv1.InfrastructureReadyCondition) {
 			return false
 		}
 		readyCondition := conditions.Get(machine, clusterv1.ReadyCondition)
 		return readyCondition.Status == corev1.ConditionTrue
 	}, timeout).Should(BeTrue())
 
-	g.Expect(env.Delete(ctx, machine)).NotTo(HaveOccurred())
+	g.Expect(env.Delete(ctx, machine)).ToNot(HaveOccurred())
 	// Wait for Machine to be deleted.
 	g.Eventually(func() bool {
 		if err := env.Get(ctx, key, machine); err != nil {
@@ -387,12 +389,14 @@ func TestMachineFinalizer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
+			c := fake.NewClientBuilder().WithObjects(
+				clusterCorrectMeta,
+				machineValidCluster,
+				machineWithFinalizer,
+			).Build()
 			mr := &Reconciler{
-				Client: fake.NewClientBuilder().WithObjects(
-					clusterCorrectMeta,
-					machineValidCluster,
-					machineWithFinalizer,
-				).Build(),
+				Client:                    c,
+				UnstructuredCachingClient: c,
 			}
 
 			_, _ = mr.Reconcile(ctx, tc.request)
@@ -445,14 +449,14 @@ func TestMachineOwnerReference(t *testing.T) {
 			Name:      "machine3",
 			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName: "valid-cluster",
+				clusterv1.ClusterNameLabel: "valid-cluster",
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: clusterv1.GroupVersion.String(),
 					Kind:       "MachineSet",
 					Name:       "valid-machineset",
-					Controller: pointer.BoolPtr(true),
+					Controller: pointer.Bool(true),
 				},
 			},
 		},
@@ -469,15 +473,15 @@ func TestMachineOwnerReference(t *testing.T) {
 			Name:      "machine4",
 			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName:             "valid-cluster",
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.ClusterNameLabel:         "valid-cluster",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "test.group",
 					Kind:       "KubeadmControlPlane",
 					Name:       "valid-controlplane",
-					Controller: pointer.BoolPtr(true),
+					Controller: pointer.Bool(true),
 				},
 			},
 		},
@@ -521,7 +525,7 @@ func TestMachineOwnerReference(t *testing.T) {
 					APIVersion: clusterv1.GroupVersion.String(),
 					Kind:       "MachineSet",
 					Name:       "valid-machineset",
-					Controller: pointer.BoolPtr(true),
+					Controller: pointer.Bool(true),
 				},
 			},
 		},
@@ -536,7 +540,7 @@ func TestMachineOwnerReference(t *testing.T) {
 					APIVersion: "test.group",
 					Kind:       "KubeadmControlPlane",
 					Name:       "valid-controlplane",
-					Controller: pointer.BoolPtr(true),
+					Controller: pointer.Bool(true),
 				},
 			},
 		},
@@ -552,10 +556,11 @@ func TestMachineOwnerReference(t *testing.T) {
 				machineValidCluster,
 				machineValidMachine,
 				machineValidControlled,
-			).Build()
+			).WithStatusSubresource(&clusterv1.Machine{}).Build()
 			mr := &Reconciler{
-				Client:    c,
-				APIReader: c,
+				Client:                    c,
+				UnstructuredCachingClient: c,
+				APIReader:                 c,
 			}
 
 			key := client.ObjectKey{Namespace: tc.m.Namespace, Name: tc.m.Name}
@@ -563,7 +568,7 @@ func TestMachineOwnerReference(t *testing.T) {
 
 			// this first requeue is to add finalizer
 			result, err := mr.Reconcile(ctx, tc.request)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(result).To(Equal(ctrl.Result{}))
 			g.Expect(mr.Client.Get(ctx, key, &actual)).To(Succeed())
 			g.Expect(actual.Finalizers).To(ContainElement(clusterv1.MachineFinalizer))
@@ -615,8 +620,7 @@ func TestReconcileRequest(t *testing.T) {
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test",
-			Namespace: metav1.NamespaceDefault,
+			Name: "test",
 		},
 		Spec: corev1.NodeSpec{ProviderID: "test://id-1"},
 	}
@@ -643,7 +647,7 @@ func TestReconcileRequest(t *testing.T) {
 						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
-					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -671,7 +675,7 @@ func TestReconcileRequest(t *testing.T) {
 						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
-					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -691,7 +695,7 @@ func TestReconcileRequest(t *testing.T) {
 					Name:      "deleted",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.MachineControlPlaneLabelName: "",
+						clusterv1.MachineControlPlaneLabel: "",
 					},
 					Finalizers:        []string{clusterv1.MachineFinalizer},
 					DeletionTimestamp: &time,
@@ -703,7 +707,7 @@ func TestReconcileRequest(t *testing.T) {
 						Kind:       "GenericInfrastructureMachine",
 						Name:       "infra-config1",
 					},
-					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 			},
 			expected: expected{
@@ -723,18 +727,20 @@ func TestReconcileRequest(t *testing.T) {
 				&tc.machine,
 				builder.GenericInfrastructureMachineCRD.DeepCopy(),
 				&infraConfig,
-			).Build()
+			).WithStatusSubresource(&clusterv1.Machine{}).WithIndex(&corev1.Node{}, index.NodeProviderIDField, index.NodeByProviderID).Build()
 
 			r := &Reconciler{
-				Client:  clientFake,
-				Tracker: remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: testCluster.Name, Namespace: testCluster.Namespace}),
+				Client:                    clientFake,
+				UnstructuredCachingClient: clientFake,
+				Tracker:                   remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: testCluster.Name, Namespace: testCluster.Namespace}),
+				ssaCache:                  ssa.NewCache(),
 			}
 
 			result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: util.ObjectKey(&tc.machine)})
 			if tc.expected.err {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 
 			g.Expect(result).To(Equal(tc.expected.result))
@@ -800,12 +806,12 @@ func TestMachineConditions(t *testing.T) {
 			Name:      "blah",
 			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 			Finalizers: []string{clusterv1.MachineFinalizer},
 		},
 		Spec: clusterv1.MachineSpec{
-			ProviderID:  pointer.StringPtr("test://id-1"),
+			ProviderID:  pointer.String("test://id-1"),
 			ClusterName: "test-cluster",
 			InfrastructureRef: corev1.ObjectReference{
 				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
@@ -830,8 +836,7 @@ func TestMachineConditions(t *testing.T) {
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test",
-			Namespace: metav1.NamespaceDefault,
+			Name: "test",
 		},
 		Spec: corev1.NodeSpec{ProviderID: "test://id-1"},
 	}
@@ -968,18 +973,23 @@ func TestMachineConditions(t *testing.T) {
 				builder.GenericBootstrapConfigCRD.DeepCopy(),
 				bootstrap,
 				node,
-			).Build()
+			).
+				WithIndex(&corev1.Node{}, index.NodeProviderIDField, index.NodeByProviderID).
+				WithStatusSubresource(&clusterv1.Machine{}).
+				Build()
 
 			r := &Reconciler{
-				Client:  clientFake,
-				Tracker: remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: testCluster.Name, Namespace: testCluster.Namespace}),
+				Client:                    clientFake,
+				UnstructuredCachingClient: clientFake,
+				Tracker:                   remote.NewTestClusterCacheTracker(logr.New(log.NullLogSink{}), clientFake, scheme.Scheme, client.ObjectKey{Name: testCluster.Name, Namespace: testCluster.Namespace}),
+				ssaCache:                  ssa.NewCache(),
 			}
 
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: util.ObjectKey(&machine)})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			m = &clusterv1.Machine{}
-			g.Expect(r.Client.Get(ctx, client.ObjectKeyFromObject(&machine), m)).NotTo(HaveOccurred())
+			g.Expect(r.Client.Get(ctx, client.ObjectKeyFromObject(&machine), m)).ToNot(HaveOccurred())
 
 			assertConditions(t, m, tt.conditionsToAssert...)
 		})
@@ -1059,8 +1069,10 @@ func TestReconcileDeleteExternal(t *testing.T) {
 				objs = append(objs, bootstrapConfig)
 			}
 
+			c := fake.NewClientBuilder().WithObjects(objs...).Build()
 			r := &Reconciler{
-				Client: fake.NewClientBuilder().WithObjects(objs...).Build(),
+				Client:                    c,
+				UnstructuredCachingClient: c,
 			}
 
 			obj, err := r.reconcileDeleteExternal(ctx, machine, machine.Spec.Bootstrap.ConfigRef)
@@ -1068,7 +1080,7 @@ func TestReconcileDeleteExternal(t *testing.T) {
 			if tc.expectError {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 		})
 	}
@@ -1097,12 +1109,14 @@ func TestRemoveMachineFinalizerAfterDeleteReconcile(t *testing.T) {
 				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
-			Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+			Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 		},
 	}
 	key := client.ObjectKey{Namespace: m.Namespace, Name: m.Name}
+	c := fake.NewClientBuilder().WithObjects(testCluster, m).WithStatusSubresource(&clusterv1.Machine{}).Build()
 	mr := &Reconciler{
-		Client: fake.NewClientBuilder().WithObjects(testCluster, m).Build(),
+		Client:                    c,
+		UnstructuredCachingClient: c,
 	}
 	_, err := mr.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -1135,7 +1149,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{},
 			},
@@ -1152,7 +1166,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 					NodeDrainTimeout:  &metav1.Duration{Duration: time.Second * 60},
 				},
 
@@ -1179,7 +1193,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 					NodeDrainTimeout:  &metav1.Duration{Duration: time.Second * 60},
 				},
 				Status: clusterv1.MachineStatus{
@@ -1205,7 +1219,7 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					Conditions: clusterv1.Conditions{
@@ -1227,11 +1241,140 @@ func TestIsNodeDrainedAllowed(t *testing.T) {
 			var objs []client.Object
 			objs = append(objs, testCluster, tt.machine)
 
+			c := fake.NewClientBuilder().WithObjects(objs...).Build()
 			r := &Reconciler{
-				Client: fake.NewClientBuilder().WithObjects(objs...).Build(),
+				Client:                    c,
+				UnstructuredCachingClient: c,
 			}
 
 			got := r.isNodeDrainAllowed(tt.machine)
+			g.Expect(got).To(Equal(tt.expected))
+		})
+	}
+}
+
+func TestIsNodeVolumeDetachingAllowed(t *testing.T) {
+	testCluster := &clusterv1.Cluster{
+		TypeMeta:   metav1.TypeMeta{Kind: "Cluster", APIVersion: clusterv1.GroupVersion.String()},
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "test-cluster"},
+	}
+
+	tests := []struct {
+		name     string
+		machine  *clusterv1.Machine
+		expected bool
+	}{
+		{
+			name: "Exclude wait node volume detaching annotation exists",
+			machine: &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-machine",
+					Namespace:   metav1.NamespaceDefault,
+					Finalizers:  []string{clusterv1.MachineFinalizer},
+					Annotations: map[string]string{clusterv1.ExcludeWaitForNodeVolumeDetachAnnotation: "existed!!"},
+				},
+				Spec: clusterv1.MachineSpec{
+					ClusterName:       "test-cluster",
+					InfrastructureRef: corev1.ObjectReference{},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
+				},
+				Status: clusterv1.MachineStatus{},
+			},
+			expected: false,
+		},
+		{
+			name: "Volume detach timeout is over",
+			machine: &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-machine",
+					Namespace:  metav1.NamespaceDefault,
+					Finalizers: []string{clusterv1.MachineFinalizer},
+				},
+				Spec: clusterv1.MachineSpec{
+					ClusterName:             "test-cluster",
+					InfrastructureRef:       corev1.ObjectReference{},
+					Bootstrap:               clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
+					NodeVolumeDetachTimeout: &metav1.Duration{Duration: time.Second * 30},
+				},
+
+				Status: clusterv1.MachineStatus{
+					Conditions: clusterv1.Conditions{
+						{
+							Type:               clusterv1.VolumeDetachSucceededCondition,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: metav1.Time{Time: time.Now().Add(-(time.Second * 60)).UTC()},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "Volume detach timeout is not yet over",
+			machine: &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-machine",
+					Namespace:  metav1.NamespaceDefault,
+					Finalizers: []string{clusterv1.MachineFinalizer},
+				},
+				Spec: clusterv1.MachineSpec{
+					ClusterName:             "test-cluster",
+					InfrastructureRef:       corev1.ObjectReference{},
+					Bootstrap:               clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
+					NodeVolumeDetachTimeout: &metav1.Duration{Duration: time.Second * 60},
+				},
+				Status: clusterv1.MachineStatus{
+					Conditions: clusterv1.Conditions{
+						{
+							Type:               clusterv1.VolumeDetachSucceededCondition,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: metav1.Time{Time: time.Now().Add(-(time.Second * 30)).UTC()},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Volume detach timeout option is set to it's default value 0",
+			machine: &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-machine",
+					Namespace:  metav1.NamespaceDefault,
+					Finalizers: []string{clusterv1.MachineFinalizer},
+				},
+				Spec: clusterv1.MachineSpec{
+					ClusterName:       "test-cluster",
+					InfrastructureRef: corev1.ObjectReference{},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
+				},
+				Status: clusterv1.MachineStatus{
+					Conditions: clusterv1.Conditions{
+						{
+							Type:               clusterv1.VolumeDetachSucceededCondition,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: metav1.Time{Time: time.Now().Add(-(time.Second * 1000)).UTC()},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			var objs []client.Object
+			objs = append(objs, testCluster, tt.machine)
+
+			c := fake.NewClientBuilder().WithObjects(objs...).Build()
+			r := &Reconciler{
+				Client:                    c,
+				UnstructuredCachingClient: c,
+			}
+
+			got := r.isNodeVolumeDetachingAllowed(tt.machine)
 			g.Expect(got).To(Equal(tt.expected))
 		})
 	}
@@ -1259,14 +1402,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{},
 			},
@@ -1285,14 +1428,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1315,8 +1458,8 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName:             "test-cluster",
-						clusterv1.MachineControlPlaneLabelName: "",
+						clusterv1.ClusterNameLabel:         "test-cluster",
+						clusterv1.MachineControlPlaneLabel: "",
 					},
 					Finalizers:        []string{clusterv1.MachineFinalizer},
 					DeletionTimestamp: &metav1.Time{Time: time.Now().UTC()},
@@ -1324,7 +1467,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1347,14 +1490,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1371,6 +1514,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:              "test-cluster",
 					Namespace:         metav1.NamespaceDefault,
 					DeletionTimestamp: &deletionts,
+					Finalizers:        []string{clusterv1.ClusterFinalizer},
 				},
 			},
 			machine:       &clusterv1.Machine{},
@@ -1397,14 +1541,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1435,14 +1579,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1473,14 +1617,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "created",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1512,6 +1656,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 	mcpBeingDeleted.SetName("test-cluster-2")
 	mcpBeingDeleted.SetNamespace("test-cluster")
 	mcpBeingDeleted.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	mcpBeingDeleted.SetFinalizers([]string{"block-deletion"})
 
 	empBeingDeleted := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -1525,6 +1670,7 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 	empBeingDeleted.SetName("test-cluster-3")
 	empBeingDeleted.SetNamespace("test-cluster")
 	empBeingDeleted.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	empBeingDeleted.SetFinalizers([]string{"block-deletion"})
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1535,14 +1681,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "cp1",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1555,14 +1701,14 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 					Name:      "cp2",
 					Namespace: metav1.NamespaceDefault,
 					Labels: map[string]string{
-						clusterv1.ClusterLabelName: "test-cluster",
+						clusterv1.ClusterNameLabel: "test-cluster",
 					},
 					Finalizers: []string{clusterv1.MachineFinalizer},
 				},
 				Spec: clusterv1.MachineSpec{
 					ClusterName:       "test-cluster",
 					InfrastructureRef: corev1.ObjectReference{},
-					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+					Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 				},
 				Status: clusterv1.MachineStatus{
 					NodeRef: &corev1.ObjectReference{
@@ -1572,25 +1718,27 @@ func TestIsDeleteNodeAllowed(t *testing.T) {
 			}
 			// For isDeleteNodeAllowed to be true we assume a healthy control plane.
 			if tc.expectedError == nil {
-				m1.Labels[clusterv1.MachineControlPlaneLabelName] = ""
-				m2.Labels[clusterv1.MachineControlPlaneLabelName] = ""
+				m1.Labels[clusterv1.MachineControlPlaneLabel] = ""
+				m2.Labels[clusterv1.MachineControlPlaneLabel] = ""
 			}
 
+			c := fake.NewClientBuilder().WithObjects(
+				tc.cluster,
+				tc.machine,
+				m1,
+				m2,
+				emp,
+				mcpBeingDeleted,
+				empBeingDeleted,
+			).Build()
 			mr := &Reconciler{
-				Client: fake.NewClientBuilder().WithObjects(
-					tc.cluster,
-					tc.machine,
-					m1,
-					m2,
-					emp,
-					mcpBeingDeleted,
-					empBeingDeleted,
-				).Build(),
+				Client:                    c,
+				UnstructuredCachingClient: c,
 			}
 
 			err := mr.isDeleteNodeAllowed(ctx, tc.cluster, tc.machine)
 			if tc.expectedError == nil {
-				g.Expect(err).To(BeNil())
+				g.Expect(err).ToNot(HaveOccurred())
 			} else {
 				g.Expect(err).To(Equal(tc.expectedError))
 			}
@@ -1675,7 +1823,7 @@ func TestNodeToMachine(t *testing.T) {
 			Name: "test-node-to-machine-1",
 		},
 		Spec: corev1.NodeSpec{
-			ProviderID: "test:///id-1",
+			ProviderID: "test://id-1",
 		},
 	}
 
@@ -1684,17 +1832,17 @@ func TestNodeToMachine(t *testing.T) {
 			Name: "test-node-to-machine-node-2",
 		},
 		Spec: corev1.NodeSpec{
-			ProviderID: "test:///id-2",
+			ProviderID: "test://id-2",
 		},
 	}
 
-	g.Expect(env.Create(ctx, testCluster)).To(BeNil())
+	g.Expect(env.Create(ctx, testCluster)).To(Succeed())
 	g.Expect(env.CreateKubeconfigSecret(ctx, testCluster)).To(Succeed())
-	g.Expect(env.Create(ctx, defaultBootstrap)).To(BeNil())
+	g.Expect(env.Create(ctx, defaultBootstrap)).To(Succeed())
 	g.Expect(env.Create(ctx, targetNode)).To(Succeed())
 	g.Expect(env.Create(ctx, randomNode)).To(Succeed())
-	g.Expect(env.Create(ctx, infraMachine)).To(BeNil())
-	g.Expect(env.Create(ctx, infraMachine2)).To(BeNil())
+	g.Expect(env.Create(ctx, infraMachine)).To(Succeed())
+	g.Expect(env.Create(ctx, infraMachine2)).To(Succeed())
 
 	defer func(do ...client.Object) {
 		g.Expect(env.Cleanup(ctx, do...)).To(Succeed())
@@ -1724,7 +1872,7 @@ func TestNodeToMachine(t *testing.T) {
 			GenerateName: "machine-created-",
 			Namespace:    ns.Name,
 			Labels: map[string]string{
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 		},
 		Spec: clusterv1.MachineSpec{
@@ -1743,7 +1891,7 @@ func TestNodeToMachine(t *testing.T) {
 			}},
 	}
 
-	g.Expect(env.Create(ctx, expectedMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, expectedMachine)).To(Succeed())
 	defer func() {
 		g.Expect(env.Cleanup(ctx, expectedMachine)).To(Succeed())
 	}()
@@ -1763,7 +1911,7 @@ func TestNodeToMachine(t *testing.T) {
 			GenerateName: "machine-created-",
 			Namespace:    ns.Name,
 			Labels: map[string]string{
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 		},
 		Spec: clusterv1.MachineSpec{
@@ -1782,7 +1930,7 @@ func TestNodeToMachine(t *testing.T) {
 			}},
 	}
 
-	g.Expect(env.Create(ctx, randomMachine)).To(BeNil())
+	g.Expect(env.Create(ctx, randomMachine)).To(Succeed())
 	defer func() {
 		g.Expect(env.Cleanup(ctx, randomMachine)).To(Succeed())
 	}()
@@ -1848,10 +1996,11 @@ func TestNodeToMachine(t *testing.T) {
 	}
 
 	r := &Reconciler{
-		Client: env,
+		Client:                    env,
+		UnstructuredCachingClient: env,
 	}
 	for _, node := range fakeNodes {
-		request := r.nodeToMachine(node)
+		request := r.nodeToMachine(ctx, node)
 		g.Expect(request).To(BeEquivalentTo([]reconcile.Request{
 			{
 				NamespacedName: client.ObjectKeyFromObject(expectedMachine),
@@ -1896,7 +2045,7 @@ func TestNodeDeletion(t *testing.T) {
 			Name:      "test",
 			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 			Annotations: map[string]string{
 				"machine.cluster.x-k8s.io/exclude-node-draining": "",
@@ -1911,7 +2060,7 @@ func TestNodeDeletion(t *testing.T) {
 				Kind:       "GenericInfrastructureMachine",
 				Name:       "infra-config1",
 			},
-			Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+			Bootstrap: clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 		},
 		Status: clusterv1.MachineStatus{
 			NodeRef: &corev1.ObjectReference{
@@ -1925,15 +2074,15 @@ func TestNodeDeletion(t *testing.T) {
 			Name:      "cp1",
 			Namespace: metav1.NamespaceDefault,
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName:             "test-cluster",
-				clusterv1.MachineControlPlaneLabelName: "",
+				clusterv1.ClusterNameLabel:         "test-cluster",
+				clusterv1.MachineControlPlaneLabel: "",
 			},
 			Finalizers: []string{clusterv1.MachineFinalizer},
 		},
 		Spec: clusterv1.MachineSpec{
 			ClusterName:       "test-cluster",
 			InfrastructureRef: corev1.ObjectReference{},
-			Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.StringPtr("data")},
+			Bootstrap:         clusterv1.Bootstrap{DataSecretName: pointer.String("data")},
 		},
 		Status: clusterv1.MachineStatus{
 			NodeRef: &corev1.ObjectReference{
@@ -1958,6 +2107,7 @@ func TestNodeDeletion(t *testing.T) {
 			createFakeClient: func(initObjs ...client.Object) client.Client {
 				return fake.NewClientBuilder().
 					WithObjects(initObjs...).
+					WithStatusSubresource(&clusterv1.Machine{}).
 					Build()
 			},
 		},
@@ -1969,6 +2119,7 @@ func TestNodeDeletion(t *testing.T) {
 			createFakeClient: func(initObjs ...client.Object) client.Client {
 				fc := fake.NewClientBuilder().
 					WithObjects(initObjs...).
+					WithStatusSubresource(&clusterv1.Machine{}).
 					Build()
 				return fakeClientWithNodeDeletionErr{fc}
 			},
@@ -1981,6 +2132,7 @@ func TestNodeDeletion(t *testing.T) {
 			createFakeClient: func(initObjs ...client.Object) client.Client {
 				fc := fake.NewClientBuilder().
 					WithObjects(initObjs...).
+					WithStatusSubresource(&clusterv1.Machine{}).
 					Build()
 				return fakeClientWithNodeDeletionErr{fc}
 			},
@@ -1993,6 +2145,7 @@ func TestNodeDeletion(t *testing.T) {
 			createFakeClient: func(initObjs ...client.Object) client.Client {
 				fc := fake.NewClientBuilder().
 					WithObjects(initObjs...).
+					WithStatusSubresource(&clusterv1.Machine{}).
 					Build()
 				return fakeClientWithNodeDeletionErr{fc}
 			},
@@ -2006,6 +2159,7 @@ func TestNodeDeletion(t *testing.T) {
 			createFakeClient: func(initObjs ...client.Object) client.Client {
 				fc := fake.NewClientBuilder().
 					WithObjects(initObjs...).
+					WithStatusSubresource(&clusterv1.Machine{}).
 					Build()
 				return fakeClientWithNodeDeletionErr{fc}
 			},
@@ -2021,10 +2175,11 @@ func TestNodeDeletion(t *testing.T) {
 			tracker := remote.NewTestClusterCacheTracker(ctrl.Log, fakeClient, fakeScheme, client.ObjectKeyFromObject(&testCluster))
 
 			r := &Reconciler{
-				Client:                   fakeClient,
-				Tracker:                  tracker,
-				recorder:                 record.NewFakeRecorder(10),
-				nodeDeletionRetryTimeout: 10 * time.Millisecond,
+				Client:                    fakeClient,
+				UnstructuredCachingClient: fakeClient,
+				Tracker:                   tracker,
+				recorder:                  record.NewFakeRecorder(10),
+				nodeDeletionRetryTimeout:  10 * time.Millisecond,
 			}
 
 			cluster := testCluster.DeepCopy()
@@ -2037,7 +2192,7 @@ func TestNodeDeletion(t *testing.T) {
 			if tc.resultErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 				if tc.expectNodeDeletion {
 					n := &corev1.Node{}
 					g.Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(node), n)).NotTo(Succeed())
@@ -2058,7 +2213,7 @@ func addConditionsToExternal(u *unstructured.Unstructured, newConditions cluster
 }
 
 // asserts the conditions set on the Getter object.
-// TODO: replace this with util.condition.MatchConditions (or a new matcher in internal/matchers).
+// TODO: replace this with util.condition.MatchConditions (or a new matcher in controller runtime komega).
 func assertConditions(t *testing.T, from conditions.Getter, conditions ...*clusterv1.Condition) {
 	t.Helper()
 

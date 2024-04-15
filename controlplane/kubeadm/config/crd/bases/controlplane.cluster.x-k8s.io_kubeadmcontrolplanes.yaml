@@ -3,8 +3,12 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+<<<<<<< HEAD
     controller-gen.kubebuilder.io/version: v0.9.1
   creationTimestamp: null
+=======
+    controller-gen.kubebuilder.io/version: v0.12.0
+>>>>>>> v1.5.7
   name: kubeadmcontrolplanes.controlplane.cluster.x-k8s.io
 spec:
   group: controlplane.cluster.x-k8s.io
@@ -51,11 +55,12 @@ spec:
       jsonPath: .status.unavailableReplicas
       name: Unavailable
       type: integer
+    deprecated: true
     name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: KubeadmControlPlane is the Schema for the KubeadmControlPlane
-          API.
+        description: "KubeadmControlPlane is the Schema for the KubeadmControlPlane
+          API. \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -1184,7 +1189,7 @@ spec:
                 type: integer
             type: object
         type: object
-    served: true
+    served: false
     storage: false
     subresources:
       scale:
@@ -1228,11 +1233,12 @@ spec:
       jsonPath: .status.unavailableReplicas
       name: Unavailable
       type: integer
+    deprecated: true
     name: v1alpha4
     schema:
       openAPIV3Schema:
-        description: KubeadmControlPlane is the Schema for the KubeadmControlPlane
-          API.
+        description: "KubeadmControlPlane is the Schema for the KubeadmControlPlane
+          API. \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -2701,6 +2707,7 @@ spec:
                         description: FeatureGates enabled by the user.
                         type: object
                       imageRepository:
+<<<<<<< HEAD
                         description: ImageRepository sets the container registry to
                           pull images from. If empty, `registry.k8s.io` will be used
                           by default; in case of kubernetes version is a CI build
@@ -2708,6 +2715,22 @@ spec:
                           will be used as a default for control plane components and
                           for kube-proxy, while `registry.k8s.io` will be used for
                           all the other images.
+=======
+                        description: 'ImageRepository sets the container registry
+                          to pull images from. * If not set, the default registry
+                          of kubeadm will be used, i.e. * registry.k8s.io (new registry):
+                          >= v1.22.17, >= v1.23.15, >= v1.24.9, >= v1.25.0 * k8s.gcr.io
+                          (old registry): all older versions Please note that when
+                          imageRepository is not set we don''t allow upgrades to versions
+                          >= v1.22.0 which use the old registry (k8s.gcr.io). Please
+                          use a newer patch version with the new registry instead
+                          (i.e. >= v1.22.17, >= v1.23.15, >= v1.24.9, >= v1.25.0).
+                          * If the version is a CI build (kubernetes version starts
+                          with `ci/` or `ci-cross/`) `gcr.io/k8s-staging-ci-images`
+                          will be used as a default for control plane components and
+                          for kube-proxy, while `registry.k8s.io` will be used for
+                          all the other images.'
+>>>>>>> v1.5.7
                         type: string
                       kind:
                         description: 'Kind is a string value representing the REST
@@ -3063,6 +3086,18 @@ spec:
                             items:
                               type: string
                             type: array
+                          imagePullPolicy:
+                            description: ImagePullPolicy specifies the policy for
+                              image pulling during kubeadm "init" and "join" operations.
+                              The value of this field must be one of "Always", "IfNotPresent"
+                              or "Never". Defaults to "IfNotPresent". This can be
+                              used only with Kubernetes version equal to 1.22 and
+                              later.
+                            enum:
+                            - Always
+                            - IfNotPresent
+                            - Never
+                            type: string
                           kubeletExtraArgs:
                             additionalProperties:
                               type: string
@@ -3089,7 +3124,7 @@ spec:
                               i.e. nil, in the `kubeadm init` process it will be defaulted
                               to []v1.Taint{''node-role.kubernetes.io/master=""''}.
                               If you don''t want to taint your control-plane node,
-                              set this field to an empty slice, i.e. `taints: {}`
+                              set this field to an empty slice, i.e. `taints: []`
                               in the YAML file. This field is solely used for Node
                               registration.'
                             items:
@@ -3283,6 +3318,18 @@ spec:
                             items:
                               type: string
                             type: array
+                          imagePullPolicy:
+                            description: ImagePullPolicy specifies the policy for
+                              image pulling during kubeadm "init" and "join" operations.
+                              The value of this field must be one of "Always", "IfNotPresent"
+                              or "Never". Defaults to "IfNotPresent". This can be
+                              used only with Kubernetes version equal to 1.22 and
+                              later.
+                            enum:
+                            - Always
+                            - IfNotPresent
+                            - Never
+                            type: string
                           kubeletExtraArgs:
                             additionalProperties:
                               type: string
@@ -3309,7 +3356,7 @@ spec:
                               i.e. nil, in the `kubeadm init` process it will be defaulted
                               to []v1.Taint{''node-role.kubernetes.io/master=""''}.
                               If you don''t want to taint your control-plane node,
-                              set this field to an empty slice, i.e. `taints: {}`
+                              set this field to an empty slice, i.e. `taints: []`
                               in the YAML file. This field is solely used for Node
                               registration.'
                             items:
@@ -3415,8 +3462,14 @@ spec:
                       The long term goal is to add retries to kubeadm proper and use
                       that functionality. \n This will add about 40KB to userdata
                       \n For more information, refer to https://github.com/kubernetes-sigs/cluster-api/pull/2763#discussion_r397306055.
+<<<<<<< HEAD
                       Deprecated: This experimental fix is no longer needed and this
                       field will be removed in a future release."
+=======
+                      \n Deprecated: This experimental fix is no longer needed and
+                      this field will be removed in a future release. When removing
+                      also remove from staticcheck exclude-rules for SA1019 in golangci.yml"
+>>>>>>> v1.5.7
                     type: boolean
                   users:
                     description: Users specifies extra users to add
@@ -3577,8 +3630,59 @@ spec:
                       any time limitations. NOTE: NodeDrainTimeout is different from
                       `kubectl drain --timeout`'
                     type: string
+                  nodeVolumeDetachTimeout:
+                    description: NodeVolumeDetachTimeout is the total amount of time
+                      that the controller will spend on waiting for all volumes to
+                      be detached. The default value is 0, meaning that the volumes
+                      can be detached without any time limitations.
+                    type: string
                 required:
                 - infrastructureRef
+                type: object
+              remediationStrategy:
+                description: The RemediationStrategy that controls how control plane
+                  machine remediation happens.
+                properties:
+                  maxRetry:
+                    description: "MaxRetry is the Max number of retries while attempting
+                      to remediate an unhealthy machine. A retry happens when a machine
+                      that was created as a replacement for an unhealthy machine also
+                      fails. For example, given a control plane with three machines
+                      M1, M2, M3: \n M1 become unhealthy; remediation happens, and
+                      M1-1 is created as a replacement. If M1-1 (replacement of M1)
+                      has problems while bootstrapping it will become unhealthy, and
+                      then be remediated; such operation is considered a retry, remediation-retry
+                      #1. If M1-2 (replacement of M1-1) becomes unhealthy, remediation-retry
+                      #2 will happen, etc. \n A retry could happen only after RetryPeriod
+                      from the previous retry. If a machine is marked as unhealthy
+                      after MinHealthyPeriod from the previous remediation expired,
+                      this is not considered a retry anymore because the new issue
+                      is assumed unrelated from the previous one. \n If not set, the
+                      remedation will be retried infinitely."
+                    format: int32
+                    type: integer
+                  minHealthyPeriod:
+                    description: "MinHealthyPeriod defines the duration after which
+                      KCP will consider any failure to a machine unrelated from the
+                      previous one. In this case the remediation is not considered
+                      a retry anymore, and thus the retry counter restarts from 0.
+                      For example, assuming MinHealthyPeriod is set to 1h (default)
+                      \n M1 become unhealthy; remediation happens, and M1-1 is created
+                      as a replacement. If M1-1 (replacement of M1) has problems within
+                      the 1hr after the creation, also this machine will be remediated
+                      and this operation is considered a retry - a problem related
+                      to the original issue happened to M1 -. \n If instead the problem
+                      on M1-1 is happening after MinHealthyPeriod expired, e.g. four
+                      days after m1-1 has been created as a remediation of M1, the
+                      problem on M1-1 is considered unrelated to the original issue
+                      happened to M1. \n If not set, this value is defaulted to 1h."
+                    type: string
+                  retryPeriod:
+                    description: "RetryPeriod is the duration that KCP should wait
+                      before remediating a machine being created as a replacement
+                      for an unhealthy machine (a retry). \n If not set, a retry will
+                      happen immediately."
+                    type: string
                 type: object
               replicas:
                 description: Number of desired machines. Defaults to 1. When stacked
@@ -3587,11 +3691,24 @@ spec:
                 format: int32
                 type: integer
               rolloutAfter:
-                description: RolloutAfter is a field to indicate a rollout should
+                description: 'RolloutAfter is a field to indicate a rollout should
                   be performed after the specified time even if no changes have been
-                  made to the KubeadmControlPlane.
+                  made to the KubeadmControlPlane. Example: In the YAML the time can
+                  be specified in the RFC3339 format. To specify the rolloutAfter
+                  target as March 9, 2023, at 9 am UTC use "2023-03-09T09:00:00Z".'
                 format: date-time
                 type: string
+              rolloutBefore:
+                description: RolloutBefore is a field to indicate a rollout should
+                  be performed if the specified criteria is met.
+                properties:
+                  certificatesExpiryDays:
+                    description: CertificatesExpiryDays indicates a rollout needs
+                      to be performed if the certificates of the machine will expire
+                      within the specified days.
+                    format: int32
+                    type: integer
+                type: object
               rolloutStrategy:
                 default:
                   rollingUpdate:
@@ -3621,7 +3738,13 @@ spec:
                     type: string
                 type: object
               version:
-                description: Version defines the desired Kubernetes version.
+                description: 'Version defines the desired Kubernetes version. Please
+                  note that if kubeadmConfigSpec.ClusterConfiguration.imageRepository
+                  is not set we don''t allow upgrades to versions >= v1.22.0 for which
+                  kubeadm uses the old registry (k8s.gcr.io). Please use a newer patch
+                  version with the new registry instead. The default registries of
+                  kubeadm are: * registry.k8s.io (new registry): >= v1.22.17, >= v1.23.15,
+                  >= v1.24.9, >= v1.25.0 * k8s.gcr.io (old registry): all older versions'
                 type: string
             required:
             - kubeadmConfigSpec
@@ -3689,6 +3812,30 @@ spec:
                 description: Initialized denotes whether or not the control plane
                   has the uploaded kubeadm-config configmap.
                 type: boolean
+              lastRemediation:
+                description: LastRemediation stores info about last remediation performed.
+                properties:
+                  machine:
+                    description: Machine is the machine name of the latest machine
+                      being remediated.
+                    type: string
+                  retryCount:
+                    description: RetryCount used to keep track of remediation retry
+                      for the last remediated machine. A retry happens when a machine
+                      that was created as a replacement for an unhealthy machine also
+                      fails.
+                    format: int32
+                    type: integer
+                  timestamp:
+                    description: Timestamp is when last remediation happened. It is
+                      represented in RFC3339 form and is in UTC.
+                    format: date-time
+                    type: string
+                required:
+                - machine
+                - retryCount
+                - timestamp
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the latest generation observed
                   by the controller.

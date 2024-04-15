@@ -61,7 +61,7 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 				Scheme:             scheme.Scheme,
 				MetricsBindAddress: "0",
 			})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			mgrContext, mgrCancel = context.WithCancel(ctx)
 			t.Log("Starting the manager")
@@ -76,13 +76,13 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 			log := klogr.New()
 			cct, err = NewClusterCacheTracker(mgr, ClusterCacheTrackerOptions{
 				Log:     &log,
-				Indexes: DefaultIndexes,
+				Indexes: []Index{NodeProviderIDIndex},
 			})
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			t.Log("Creating a namespace for the test")
 			ns, err := env.CreateNamespace(ctx, "cluster-cache-health-test")
-			g.Expect(err).To(BeNil())
+			g.Expect(err).ToNot(HaveOccurred())
 
 			t.Log("Creating a test cluster")
 			testCluster := &clusterv1.Cluster{
@@ -130,9 +130,13 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
+			httpClient, err := rest.HTTPClientFor(env.Config)
+			g.Expect(err).ToNot(HaveOccurred())
+
 			go cct.healthCheckCluster(ctx, &healthCheckInput{
 				cluster:            testClusterKey,
 				cfg:                env.Config,
+				httpClient:         httpClient,
 				interval:           testPollInterval,
 				requestTimeout:     testPollTimeout,
 				unhealthyThreshold: testUnhealthyThreshold,
@@ -144,6 +148,39 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 				_, ok := cct.loadAccessor(testClusterKey)
 				return ok
 			}, 5*time.Second, 1*time.Second).Should(BeTrue())
+<<<<<<< HEAD
+=======
+		})
+
+		t.Run("during creation of a new cluster accessor", func(t *testing.T) {
+			g := NewWithT(t)
+			ns := setup(t, g)
+			defer teardown(t, g, ns)
+			// Create a context with a timeout to cancel the healthcheck after some time
+			ctx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			// Delete the cluster accessor and lock the cluster to simulate creation of a new cluster accessor
+			cct.deleteAccessor(ctx, testClusterKey)
+			g.Expect(cct.clusterLock.TryLock(testClusterKey)).To(BeTrue())
+			startHealthCheck := time.Now()
+
+			httpClient, err := rest.HTTPClientFor(env.Config)
+			g.Expect(err).ToNot(HaveOccurred())
+			cct.healthCheckCluster(ctx, &healthCheckInput{
+				cluster:            testClusterKey,
+				cfg:                env.Config,
+				httpClient:         httpClient,
+				interval:           testPollInterval,
+				requestTimeout:     testPollTimeout,
+				unhealthyThreshold: testUnhealthyThreshold,
+				path:               "/",
+			})
+			timeElapsedForHealthCheck := time.Since(startHealthCheck)
+			// If the duration is shorter than the timeout, we know that the healthcheck wasn't requeued properly.
+			g.Expect(timeElapsedForHealthCheck).Should(BeNumerically(">=", time.Second))
+			// The healthcheck should be aborted by the timout of the context
+			g.Expect(ctx.Done()).Should(BeClosed())
+>>>>>>> v1.5.7
 		})
 
 		t.Run("with an invalid path", func(t *testing.T) {
@@ -154,10 +191,13 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
+			httpClient, err := rest.HTTPClientFor(env.Config)
+			g.Expect(err).ToNot(HaveOccurred())
 			go cct.healthCheckCluster(ctx,
 				&healthCheckInput{
 					cluster:            testClusterKey,
 					cfg:                env.Config,
+					httpClient:         httpClient,
 					interval:           testPollInterval,
 					requestTimeout:     testPollTimeout,
 					unhealthyThreshold: testUnhealthyThreshold,
@@ -181,17 +221,20 @@ func TestClusterCacheHealthCheck(t *testing.T) {
 
 			// Set the host to a random free port on localhost
 			addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			l, err := net.ListenTCP("tcp", addr)
-			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(l.Close()).To(Succeed())
 
 			config := rest.CopyConfig(env.Config)
 			config.Host = fmt.Sprintf("http://127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port)
 
+			httpClient, err := rest.HTTPClientFor(env.Config)
+			g.Expect(err).ToNot(HaveOccurred())
 			go cct.healthCheckCluster(ctx, &healthCheckInput{
 				cluster:            testClusterKey,
 				cfg:                config,
+				httpClient:         httpClient,
 				interval:           testPollInterval,
 				requestTimeout:     testPollTimeout,
 				unhealthyThreshold: testUnhealthyThreshold,

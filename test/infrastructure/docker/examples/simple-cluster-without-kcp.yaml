@@ -32,7 +32,11 @@ metadata:
   name: controlplane-0
   namespace: default
 spec:
+<<<<<<< HEAD
   version: v1.25.0
+=======
+  version: v1.28.0
+>>>>>>> v1.5.7
   clusterName: my-cluster
   bootstrap:
     configRef:
@@ -80,7 +84,11 @@ spec:
       cluster.x-k8s.io/cluster-name: my-cluster
   template:
     spec:
+<<<<<<< HEAD
       version: v1.25.0
+=======
+      version: v1.28.0
+>>>>>>> v1.5.7
       clusterName: my-cluster
       bootstrap:
         configRef:

@@ -25,8 +25,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blang/semver"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kind/pkg/cluster/constants"
@@ -36,8 +38,8 @@ import (
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	infraexpv1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/infrastructure/docker/internal/docker"
+	"sigs.k8s.io/cluster-api/test/infrastructure/kind"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/container"
 )
 
 const (
@@ -79,7 +81,7 @@ func NewNodePool(ctx context.Context, c client.Client, cluster *clusterv1.Cluste
 // currently the nodepool supports only a recreate strategy for replacing old nodes with new ones
 // (all existing machines are killed before new ones are created).
 // TODO: consider if to support a Rollout strategy (a more progressive node replacement).
-func (np *NodePool) ReconcileMachines(ctx context.Context) (ctrl.Result, error) {
+func (np *NodePool) ReconcileMachines(ctx context.Context, remoteClient client.Client) (ctrl.Result, error) {
 	desiredReplicas := int(*np.machinePool.Spec.Replicas)
 
 	// Delete all the machines in excess (outdated machines or machines exceeding desired replica count).
@@ -140,7 +142,7 @@ func (np *NodePool) ReconcileMachines(ctx context.Context) (ctrl.Result, error) 
 	result := ctrl.Result{}
 	for i := range np.machines {
 		machine := np.machines[i]
-		if res, err := np.reconcileMachine(ctx, machine); err != nil || !res.IsZero() {
+		if res, err := np.reconcileMachine(ctx, machine, remoteClient); err != nil || !res.IsZero() {
 			if err != nil {
 				return ctrl.Result{}, errors.Wrap(err, "failed to reconcile machine")
 			}
@@ -167,15 +169,18 @@ func (np *NodePool) Delete(ctx context.Context) error {
 }
 
 func (np *NodePool) isMachineMatchingInfrastructureSpec(machine *docker.Machine) bool {
-	return imageVersion(machine) == container.SemverToOCIImageTag(*np.machinePool.Spec.Template.Spec.Version)
-}
+	// NOTE: With the current implementation we are checking if the machine is using a kindest/node image for the expected version,
+	// but not checking if the machine has the expected extra.mounts or pre.loaded images.
 
-// ImageVersion returns the version of the image used or nil if not specified
-// NOTE: Image version might be different from the Kubernetes version, because some characters
-// allowed by semver (e.g. +) can't be used for image tags, so they are replaced with "_".
-func imageVersion(m *docker.Machine) string {
-	containerImage := m.ContainerImage()
-	return containerImage[strings.LastIndex(containerImage, ":")+1:]
+	semVer, err := semver.Parse(strings.TrimPrefix(*np.machinePool.Spec.Template.Spec.Version, "v"))
+	if err != nil {
+		// TODO: consider if to return an error
+		panic(errors.Wrap(err, "failed to parse DockerMachine version").Error())
+	}
+
+	kindMapping := kind.GetMapping(semVer, np.dockerMachinePool.Spec.Template.CustomImage)
+
+	return machine.ContainerImage() == kindMapping.Image
 }
 
 // machinesMatchingInfrastructureSpec returns all of the docker.Machines which match the machine pool / docker machine pool spec.
@@ -240,7 +245,7 @@ func (np *NodePool) refresh(ctx context.Context) error {
 }
 
 // reconcileMachine will build and provision a docker machine and update the docker machine pool status for that instance.
-func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machine) (ctrl.Result, error) {
+func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machine, remoteClient client.Client) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	var machineStatus infraexpv1.DockerMachinePoolInstanceStatus
@@ -277,28 +282,35 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 
 	// if the machine isn't bootstrapped, only then run bootstrap scripts
 	if !machineStatus.Bootstrapped {
-		log.Info("Bootstrapping instance", "instance", machine.Name())
-		if err := externalMachine.PreloadLoadImages(ctx, np.dockerMachinePool.Spec.Template.PreLoadImages); err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to pre-load images into the docker machine with instance name %s", machine.Name())
-		}
-
-		bootstrapData, format, err := getBootstrapData(ctx, np.client, np.machinePool)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to get bootstrap data for instance named %s", machine.Name())
-		}
-
-		timeoutctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		// Run the bootstrap script. Simulates cloud-init/Ignition.
-		if err := externalMachine.ExecBootstrap(timeoutctx, bootstrapData, format); err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to exec DockerMachinePool instance bootstrap for instance named %s", machine.Name())
-		}
-		// Check for bootstrap success
-		if err := externalMachine.CheckForBootstrapSuccess(timeoutctx); err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "failed to check for existence of bootstrap success file at /run/cluster-api/bootstrap-success.complete")
-		}
 
+		// Check for bootstrap success
+		// We have to check here to make this reentrant for cases where the bootstrap works
+		// but bootstrapped is never set on the object. We only try to bootstrap if the machine
+		// is not already bootstrapped.
+		if err := externalMachine.CheckForBootstrapSuccess(timeoutCtx, false); err != nil {
+			log.Info("Bootstrapping instance", "instance", machine.Name())
+			if err := externalMachine.PreloadLoadImages(timeoutCtx, np.dockerMachinePool.Spec.Template.PreLoadImages); err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to pre-load images into the docker machine with instance name %s", machine.Name())
+			}
+
+			bootstrapData, format, err := getBootstrapData(timeoutCtx, np.client, np.machinePool)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to get bootstrap data for instance named %s", machine.Name())
+			}
+
+			// Run the bootstrap script. Simulates cloud-init/Ignition.
+			if err := externalMachine.ExecBootstrap(timeoutCtx, bootstrapData, format, np.machinePool.Spec.Template.Spec.Version, np.dockerMachinePool.Spec.Template.CustomImage); err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to exec DockerMachinePool instance bootstrap for instance named %s", machine.Name())
+			}
+			// Check for bootstrap success
+			if err := externalMachine.CheckForBootstrapSuccess(timeoutCtx, true); err != nil {
+				return ctrl.Result{}, errors.Wrap(err, "failed to check for existence of bootstrap success file at /run/cluster-api/bootstrap-success.complete")
+			}
+		}
 		machineStatus.Bootstrapped = true
+
 		// return to surface the machine has been bootstrapped.
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -306,7 +318,7 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 	if machineStatus.Addresses == nil {
 		log.Info("Fetching instance addresses", "instance", machine.Name())
 		// set address in machine status
-		machineAddress, err := externalMachine.Address(ctx)
+		machineAddresses, err := externalMachine.Address(ctx)
 		if err != nil {
 			// Requeue if there is an error, as this is likely momentary load balancer
 			// state changes during control plane provisioning.
@@ -318,14 +330,17 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 				Type:    clusterv1.MachineHostName,
 				Address: externalMachine.ContainerName(),
 			},
-			{
-				Type:    clusterv1.MachineInternalIP,
-				Address: machineAddress,
-			},
-			{
-				Type:    clusterv1.MachineExternalIP,
-				Address: machineAddress,
-			},
+		}
+		for _, addr := range machineAddresses {
+			machineStatus.Addresses = append(machineStatus.Addresses,
+				clusterv1.MachineAddress{
+					Type:    clusterv1.MachineInternalIP,
+					Address: addr,
+				},
+				clusterv1.MachineAddress{
+					Type:    clusterv1.MachineExternalIP,
+					Address: addr,
+				})
 		}
 	}
 
@@ -334,7 +349,7 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 		// Usually a cloud provider will do this, but there is no docker-cloud provider.
 		// Requeue if there is an error, as this is likely momentary load balancer
 		// state changes during control plane provisioning.
-		if err := externalMachine.SetNodeProviderID(ctx); err != nil {
+		if err = externalMachine.SetNodeProviderID(ctx, remoteClient); err != nil {
 			log.V(4).Info("transient error setting the provider id")
 			return ctrl.Result{Requeue: true}, nil //nolint:nilerr
 		}
@@ -356,7 +371,7 @@ func getBootstrapData(ctx context.Context, c client.Client, machinePool *expv1.M
 	s := &corev1.Secret{}
 	key := client.ObjectKey{Namespace: machinePool.GetNamespace(), Name: *machinePool.Spec.Template.Spec.Bootstrap.DataSecretName}
 	if err := c.Get(ctx, key, s); err != nil {
-		return "", "", errors.Wrapf(err, "failed to retrieve bootstrap data secret for DockerMachinePool instance %s/%s", machinePool.GetNamespace(), machinePool.GetName())
+		return "", "", errors.Wrapf(err, "failed to retrieve bootstrap data secret for DockerMachinePool instance %s", klog.KObj(machinePool))
 	}
 
 	value, ok := s.Data["value"]
@@ -365,7 +380,7 @@ func getBootstrapData(ctx context.Context, c client.Client, machinePool *expv1.M
 	}
 
 	format := s.Data["format"]
-	if string(format) == "" {
+	if len(format) == 0 {
 		format = []byte(bootstrapv1.CloudConfig)
 	}
 

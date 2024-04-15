@@ -3,8 +3,12 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+<<<<<<< HEAD
     controller-gen.kubebuilder.io/version: v0.9.1
   creationTimestamp: null
+=======
+    controller-gen.kubebuilder.io/version: v0.12.0
+>>>>>>> v1.5.7
   name: dockermachinepools.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -17,10 +21,12 @@ spec:
     singular: dockermachinepool
   scope: Namespaced
   versions:
-  - name: v1alpha3
+  - deprecated: true
+    name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: DockerMachinePool is the Schema for the dockermachinepools API.
+        description: "DockerMachinePool is the Schema for the dockermachinepools API.
+          \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -192,7 +198,7 @@ spec:
                 type: integer
             type: object
         type: object
-    served: true
+    served: false
     storage: false
     subresources:
       status: {}
@@ -201,10 +207,12 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    deprecated: true
     name: v1alpha4
     schema:
       openAPIV3Schema:
-        description: DockerMachinePool is the Schema for the dockermachinepools API.
+        description: "DockerMachinePool is the Schema for the dockermachinepools API.
+          \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -518,8 +526,8 @@ spec:
                             description: The machine address.
                             type: string
                           type:
-                            description: Machine address type, one of Hostname, ExternalIP
-                              or InternalIP.
+                            description: Machine address type, one of Hostname, ExternalIP,
+                              InternalIP, ExternalDNS or InternalDNS.
                             type: string
                         required:
                         - address
@@ -527,8 +535,10 @@ spec:
                         type: object
                       type: array
                     bootstrapped:
-                      description: Bootstrapped is true when the kubeadm bootstrapping
-                        has been run against this machine
+                      description: "Bootstrapped is true when the kubeadm bootstrapping
+                        has been run against this machine \n Deprecated: This field
+                        will be removed in the next apiVersion. When removing also
+                        remove from staticcheck exclude-rules for SA1019 in golangci.yml"
                       type: boolean
                     instanceName:
                       description: InstanceName is the identification of the Machine

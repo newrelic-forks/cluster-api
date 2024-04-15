@@ -3,8 +3,12 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+<<<<<<< HEAD
     controller-gen.kubebuilder.io/version: v0.9.1
   creationTimestamp: null
+=======
+    controller-gen.kubebuilder.io/version: v0.12.0
+>>>>>>> v1.5.7
   name: machines.cluster.x-k8s.io
 spec:
   group: cluster.x-k8s.io
@@ -37,10 +41,12 @@ spec:
       name: NodeName
       priority: 1
       type: string
+    deprecated: true
     name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: Machine is the Schema for the machines API.
+        description: "Machine is the Schema for the machines API. \n Deprecated: This
+          type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -353,7 +359,7 @@ spec:
                 type: string
             type: object
         type: object
-    served: true
+    served: false
     storage: false
     subresources:
       status: {}
@@ -383,10 +389,12 @@ spec:
       name: NodeName
       priority: 1
       type: string
+    deprecated: true
     name: v1alpha4
     schema:
       openAPIV3Schema:
-        description: Machine is the Schema for the machines API.
+        description: "Machine is the Schema for the machines API. \n Deprecated: This
+          type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -906,6 +914,12 @@ spec:
                   meaning that the node can be drained without any time limitations.
                   NOTE: NodeDrainTimeout is different from `kubectl drain --timeout`'
                 type: string
+              nodeVolumeDetachTimeout:
+                description: NodeVolumeDetachTimeout is the total amount of time that
+                  the controller will spend on waiting for all volumes to be detached.
+                  The default value is 0, meaning that the volumes can be detached
+                  without any time limitations.
+                type: string
               providerID:
                 description: ProviderID is the identification ID of the machine provided
                   by the provider. This field must match the provider ID as seen on
@@ -945,8 +959,8 @@ spec:
                       description: The machine address.
                       type: string
                     type:
-                      description: Machine address type, one of Hostname, ExternalIP
-                        or InternalIP.
+                      description: Machine address type, one of Hostname, ExternalIP,
+                        InternalIP, ExternalDNS or InternalDNS.
                       type: string
                   required:
                   - address
@@ -956,6 +970,11 @@ spec:
               bootstrapReady:
                 description: BootstrapReady is the state of the bootstrap provider.
                 type: boolean
+              certificatesExpiryDate:
+                description: CertificatesExpiryDate is the expiry date of the machine
+                  certificates. This value is only set for control plane machines.
+                format: date-time
+                type: string
               conditions:
                 description: Conditions defines current service state of the Machine.
                 items:

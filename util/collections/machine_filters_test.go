@@ -165,6 +165,53 @@ func TestShouldRolloutAfter(t *testing.T) {
 	})
 }
 
+func TestShouldRolloutBeforeCertificatesExpire(t *testing.T) {
+	reconciliationTime := &metav1.Time{Time: time.Now()}
+	t.Run("if rolloutBefore is nil it should return false", func(t *testing.T) {
+		g := NewWithT(t)
+		m := &clusterv1.Machine{}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, nil)(m)).To(BeFalse())
+	})
+	t.Run("if rolloutBefore.certificatesExpiryDays is nil it should return false", func(t *testing.T) {
+		g := NewWithT(t)
+		m := &clusterv1.Machine{}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, &controlplanev1.RolloutBefore{})(m)).To(BeFalse())
+	})
+	t.Run("if machine is nil it should return false", func(t *testing.T) {
+		g := NewWithT(t)
+		rb := &controlplanev1.RolloutBefore{CertificatesExpiryDays: pointer.Int32(10)}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, rb)(nil)).To(BeFalse())
+	})
+	t.Run("if the machine certificate expiry information is not available it should return false", func(t *testing.T) {
+		g := NewWithT(t)
+		m := &clusterv1.Machine{}
+		rb := &controlplanev1.RolloutBefore{CertificatesExpiryDays: pointer.Int32(10)}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, rb)(m)).To(BeFalse())
+	})
+	t.Run("if the machine certificates are not going to expire within the expiry time it should return false", func(t *testing.T) {
+		g := NewWithT(t)
+		certificateExpiryTime := reconciliationTime.Add(60 * 24 * time.Hour) // certificates will expire in 60 days from 'now'.
+		m := &clusterv1.Machine{
+			Status: clusterv1.MachineStatus{
+				CertificatesExpiryDate: &metav1.Time{Time: certificateExpiryTime},
+			},
+		}
+		rb := &controlplanev1.RolloutBefore{CertificatesExpiryDays: pointer.Int32(10)}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, rb)(m)).To(BeFalse())
+	})
+	t.Run("if machine certificates will expire within the expiry time then it should return true", func(t *testing.T) {
+		g := NewWithT(t)
+		certificateExpiryTime := reconciliationTime.Add(5 * 24 * time.Hour) // certificates will expire in 5 days from 'now'.
+		m := &clusterv1.Machine{
+			Status: clusterv1.MachineStatus{
+				CertificatesExpiryDate: &metav1.Time{Time: certificateExpiryTime},
+			},
+		}
+		rb := &controlplanev1.RolloutBefore{CertificatesExpiryDays: pointer.Int32(10)}
+		g.Expect(collections.ShouldRolloutBefore(reconciliationTime, rb)(m)).To(BeTrue())
+	})
+}
+
 func TestHashAnnotationKey(t *testing.T) {
 	t.Run("machine with specified annotation returns true", func(t *testing.T) {
 		g := NewWithT(t)
@@ -188,27 +235,27 @@ func TestHashAnnotationKey(t *testing.T) {
 func TestInFailureDomain(t *testing.T) {
 	t.Run("nil machine returns false", func(t *testing.T) {
 		g := NewWithT(t)
-		g.Expect(collections.InFailureDomains(pointer.StringPtr("test"))(nil)).To(BeFalse())
+		g.Expect(collections.InFailureDomains(pointer.String("test"))(nil)).To(BeFalse())
 	})
 	t.Run("machine with given failure domain returns true", func(t *testing.T) {
 		g := NewWithT(t)
-		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.StringPtr("test")}}
-		g.Expect(collections.InFailureDomains(pointer.StringPtr("test"))(m)).To(BeTrue())
+		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.String("test")}}
+		g.Expect(collections.InFailureDomains(pointer.String("test"))(m)).To(BeTrue())
 	})
 	t.Run("machine with a different failure domain returns false", func(t *testing.T) {
 		g := NewWithT(t)
-		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.StringPtr("notTest")}}
+		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.String("notTest")}}
 		g.Expect(collections.InFailureDomains(
-			pointer.StringPtr("test"),
-			pointer.StringPtr("test2"),
-			pointer.StringPtr("test3"),
+			pointer.String("test"),
+			pointer.String("test2"),
+			pointer.String("test3"),
 			nil,
-			pointer.StringPtr("foo"))(m)).To(BeFalse())
+			pointer.String("foo"))(m)).To(BeFalse())
 	})
 	t.Run("machine without failure domain returns false", func(t *testing.T) {
 		g := NewWithT(t)
 		m := &clusterv1.Machine{}
-		g.Expect(collections.InFailureDomains(pointer.StringPtr("test"))(m)).To(BeFalse())
+		g.Expect(collections.InFailureDomains(pointer.String("test"))(m)).To(BeFalse())
 	})
 	t.Run("machine without failure domain returns true, when nil used for failure domain", func(t *testing.T) {
 		g := NewWithT(t)
@@ -217,8 +264,8 @@ func TestInFailureDomain(t *testing.T) {
 	})
 	t.Run("machine with failure domain returns true, when one of multiple failure domains match", func(t *testing.T) {
 		g := NewWithT(t)
-		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.StringPtr("test")}}
-		g.Expect(collections.InFailureDomains(pointer.StringPtr("foo"), pointer.StringPtr("test"))(m)).To(BeTrue())
+		m := &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: pointer.String("test")}}
+		g.Expect(collections.InFailureDomains(pointer.String("foo"), pointer.String("test"))(m)).To(BeTrue())
 	})
 }
 
@@ -368,12 +415,12 @@ func TestGetFilteredMachinesForCluster(t *testing.T) {
 		Build()
 
 	machines, err := collections.GetFilteredMachinesForCluster(ctx, c, cluster)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(machines).To(HaveLen(3))
 
 	// Test the ControlPlaneMachines works
 	machines, err = collections.GetFilteredMachinesForCluster(ctx, c, cluster, collections.ControlPlaneMachines("my-cluster"))
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(machines).To(HaveLen(1))
 
 	// Test that the filters use AND logic instead of OR logic
@@ -381,7 +428,7 @@ func TestGetFilteredMachinesForCluster(t *testing.T) {
 		return cluster.Name == "first-machine"
 	}
 	machines, err = collections.GetFilteredMachinesForCluster(ctx, c, cluster, collections.ControlPlaneMachines("my-cluster"), nameFilter)
-	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(machines).To(HaveLen(1))
 }
 
@@ -395,7 +442,7 @@ func testControlPlaneMachine(name string) *clusterv1.Machine {
 		},
 	}
 	controlPlaneMachine := testMachine(name)
-	controlPlaneMachine.ObjectMeta.Labels[clusterv1.MachineControlPlaneLabelName] = ""
+	controlPlaneMachine.ObjectMeta.Labels[clusterv1.MachineControlPlaneLabel] = ""
 	controlPlaneMachine.OwnerReferences = ownedRef
 
 	return controlPlaneMachine
@@ -408,7 +455,7 @@ func testMachine(name string) *clusterv1.Machine {
 			Name:      name,
 			Namespace: "my-namespace",
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName: "my-cluster",
+				clusterv1.ClusterNameLabel: "my-cluster",
 			},
 		},
 	}

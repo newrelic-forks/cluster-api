@@ -799,6 +799,7 @@ func autoConvert_upstreamv1beta3_NodeRegistrationOptions_To_v1beta1_NodeRegistra
 	out.Taints = *(*[]corev1.Taint)(unsafe.Pointer(&in.Taints))
 	out.KubeletExtraArgs = *(*map[string]string)(unsafe.Pointer(&in.KubeletExtraArgs))
 	out.IgnorePreflightErrors = *(*[]string)(unsafe.Pointer(&in.IgnorePreflightErrors))
+	out.ImagePullPolicy = in.ImagePullPolicy
 	return nil
 }
 
@@ -808,6 +809,7 @@ func autoConvert_v1beta1_NodeRegistrationOptions_To_upstreamv1beta3_NodeRegistra
 	out.Taints = *(*[]corev1.Taint)(unsafe.Pointer(&in.Taints))
 	out.KubeletExtraArgs = *(*map[string]string)(unsafe.Pointer(&in.KubeletExtraArgs))
 	out.IgnorePreflightErrors = *(*[]string)(unsafe.Pointer(&in.IgnorePreflightErrors))
+	out.ImagePullPolicy = in.ImagePullPolicy
 	return nil
 }
 

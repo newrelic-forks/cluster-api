@@ -72,7 +72,7 @@ func (r *warmupRunnable) Start(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, r.warmupTimeout)
 	defer cancel()
 
-	err := wait.PollImmediateWithContext(ctx, r.warmupInterval, r.warmupTimeout, func(ctx context.Context) (done bool, err error) {
+	err := wait.PollUntilContextTimeout(ctx, r.warmupInterval, r.warmupTimeout, true, func(ctx context.Context) (done bool, err error) {
 		if err = warmupRegistry(ctx, r.Client, r.APIReader, r.RuntimeClient); err != nil {
 			log.Error(err, "ExtensionConfig registry warmup failed")
 			return false, nil
@@ -103,7 +103,11 @@ func warmupRegistry(ctx context.Context, client client.Client, reader client.Rea
 		extensionConfig := &extensionConfigList.Items[i]
 		original := extensionConfig.DeepCopy()
 
+<<<<<<< HEAD
 		log := log.WithValues("extensionConfig", klog.KObj(extensionConfig), "name", extensionConfig.Name, "namespace", extensionConfig.Namespace)
+=======
+		log := log.WithValues("ExtensionConfig", klog.KObj(extensionConfig))
+>>>>>>> v1.5.7
 		ctx := ctrl.LoggerInto(ctx, log)
 
 		// Inject CABundle from secret if annotation is set. Otherwise https calls may fail.

@@ -29,6 +29,10 @@ potentially block lifecycle transitions from happening.
 Following recommendations are especially relevant:
 
 * [Blocking and non Blocking](implement-extensions.md#blocking-hooks)
+<<<<<<< HEAD
+=======
+* [Error messages](implement-extensions.md#error-messages)
+>>>>>>> v1.5.7
 * [Error management](implement-extensions.md#error-management)
 * [Avoid dependencies](implement-extensions.md#avoid-dependencies)
 
@@ -45,6 +49,10 @@ determine/prepare add-ons for the Cluster and block the creation of those object
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: BeforeClusterCreateRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster
@@ -83,6 +91,10 @@ possible once the Control Plane is available. This hook does not block any furth
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: AfterControlPlaneInitializedRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster
@@ -112,11 +124,24 @@ This hook is called after the Cluster object has been updated with a new `spec.t
 immediately before the new version is going to be propagated to the control plane (*). Runtime Extension implementers 
 can use this hook to execute pre-upgrade add-on tasks and block upgrades of the ControlPlane and Workers.
 
+<<<<<<< HEAD
+=======
+Note: While the upgrade is blocked changes made to the Cluster Topology will be delayed propagating to the underlying
+objects while the object is waiting for upgrade. Example: modifying ControlPlane/MachineDeployments (think scale up),
+or creating new MachineDeployments will be delayed until the target ControlPlane/MachineDeployment is ready to pick up the upgrade. 
+This ensures that the ControlPlane and MachineDeployments do not perform a rollout prematurely while waiting to be rolled out again for the version upgrade (no double rollouts).
+This also ensures that any version specific changes are only pushed to the underlying objects also at the correct version.
+
+>>>>>>> v1.5.7
 #### Example Request:
 
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: BeforeClusterUpgradeRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster
@@ -154,11 +179,24 @@ and immediately before the new version is going to be propagated to the MachineD
 Runtime Extension implementers can use this hook to execute post-upgrade add-on tasks and block upgrades to workers
 until everything is ready.
 
+<<<<<<< HEAD
+=======
+Note: While the MachineDeployments upgrade is blocked changes made to existing MachineDeployments and creating new MachineDeployments
+will be delayed while the object is waiting for upgrade. Example: modifying MachineDeployments (think scale up),
+or creating new MachineDeployments will be delayed until the target MachineDeployment is ready to pick up the upgrade.
+This ensures that the MachineDeployments do not perform a rollout prematurely while waiting to be rolled out again for the version upgrade (no double rollouts).
+This also ensures that any version specific changes are only pushed to the underlying objects also at the correct version.
+
+>>>>>>> v1.5.7
 #### Example Request:
 
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: AfterControlPlaneUpgradeRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster
@@ -195,6 +233,10 @@ This hook does not block any further changes or upgrades to the Cluster.
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: AfterClusterUpgradeRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster
@@ -230,6 +272,10 @@ cleanup tasks for the add-ons and block deletion of the Cluster and descendant o
 ```yaml
 apiVersion: hooks.runtime.cluster.x-k8s.io/v1alpha1
 kind: BeforeClusterDeleteRequest
+<<<<<<< HEAD
+=======
+settings: <Runtime Extension settings>
+>>>>>>> v1.5.7
 cluster:
   apiVersion: cluster.x-k8s.io/v1beta1
   kind: Cluster

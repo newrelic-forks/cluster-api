@@ -17,6 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// main is the main package for mdbook-tabulate.
 package main
 
 import (
@@ -74,13 +75,9 @@ func (l Tabulate) Process(input *plugin.Input) error {
 		return err
 	}
 
-	if err := plugin.EachCommand(&input.Book, "/tabs", func(chapter *plugin.BookChapter, args string) (string, error) {
+	return plugin.EachCommand(&input.Book, "/tabs", func(chapter *plugin.BookChapter, args string) (string, error) {
 		return "</div></div>", nil
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	})
 }
 
 func main() {

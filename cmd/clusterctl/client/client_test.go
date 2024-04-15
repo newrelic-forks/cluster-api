@@ -17,6 +17,7 @@ limitations under the License.
 package client
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ import (
 )
 
 // TestNewFakeClient is a fake test to document fakeClient usage.
-func TestNewFakeClient(t *testing.T) {
+func TestNewFakeClient(_ *testing.T) {
 	// create a fake config with a provider named P1 and a variable named var
 	repository1Config := config.NewProvider("p1", "url", clusterctlv1.CoreProviderType)
 
@@ -80,6 +81,10 @@ func (f fakeClient) GetProviderComponents(provider string, providerType clusterc
 	return f.internalClient.GetProviderComponents(provider, providerType, options)
 }
 
+func (f fakeClient) GenerateProvider(provider string, providerType clusterctlv1.ProviderType, options ComponentsOptions) (Components, error) {
+	return f.internalClient.GenerateProvider(provider, providerType, options)
+}
+
 func (f fakeClient) GetClusterTemplate(options GetClusterTemplateOptions) (Template, error) {
 	return f.internalClient.GetClusterTemplate(options)
 }
@@ -104,14 +109,6 @@ func (f fakeClient) Move(options MoveOptions) error {
 	return f.internalClient.Move(options)
 }
 
-func (f fakeClient) Backup(options BackupOptions) error {
-	return f.internalClient.Backup(options)
-}
-
-func (f fakeClient) Restore(options RestoreOptions) error {
-	return f.internalClient.Restore(options)
-}
-
 func (f fakeClient) PlanUpgrade(options PlanUpgradeOptions) ([]UpgradePlan, error) {
 	return f.internalClient.PlanUpgrade(options)
 }
@@ -128,7 +125,7 @@ func (f fakeClient) ProcessYAML(options ProcessYAMLOptions) (YamlPrinter, error)
 	return f.internalClient.ProcessYAML(options)
 }
 
-func (f fakeClient) RolloutRestart(options RolloutOptions) error {
+func (f fakeClient) RolloutRestart(options RolloutRestartOptions) error {
 	return f.internalClient.RolloutRestart(options)
 }
 
@@ -136,15 +133,15 @@ func (f fakeClient) DescribeCluster(options DescribeClusterOptions) (*tree.Objec
 	return f.internalClient.DescribeCluster(options)
 }
 
-func (f fakeClient) RolloutPause(options RolloutOptions) error {
+func (f fakeClient) RolloutPause(options RolloutPauseOptions) error {
 	return f.internalClient.RolloutPause(options)
 }
 
-func (f fakeClient) RolloutResume(options RolloutOptions) error {
+func (f fakeClient) RolloutResume(options RolloutResumeOptions) error {
 	return f.internalClient.RolloutResume(options)
 }
 
-func (f fakeClient) RolloutUndo(options RolloutOptions) error {
+func (f fakeClient) RolloutUndo(options RolloutUndoOptions) error {
 	return f.internalClient.RolloutUndo(options)
 }
 
@@ -213,7 +210,7 @@ func newFakeCluster(kubeconfig cluster.Kubeconfig, configClient config.Client) *
 	}
 
 	fake.fakeProxy = test.NewFakeProxy()
-	pollImmediateWaiter := func(interval, timeout time.Duration, condition wait.ConditionFunc) error {
+	pollImmediateWaiter := func(ctx context.Context, interval, timeout time.Duration, condition wait.ConditionWithContextFunc) error {
 		return nil
 	}
 

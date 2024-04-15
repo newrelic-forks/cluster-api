@@ -25,11 +25,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/internal/controllers/topology/cluster/scope"
 	"sigs.k8s.io/cluster-api/internal/test/builder"
-	. "sigs.k8s.io/cluster-api/internal/test/matchers"
 )
 
 func TestGetBlueprint(t *testing.T) {
@@ -81,10 +81,6 @@ func TestGetBlueprint(t *testing.T) {
 		want         *scope.ClusterBlueprint
 		wantErr      bool
 	}{
-		{
-			name:    "Fails if ClusterClass does not exist",
-			wantErr: true,
-		},
 		{
 			name: "Fails if ClusterClass does not have reference to the InfrastructureClusterTemplate",
 			clusterClass: builder.ClusterClass(metav1.NamespaceDefault, "clusterclass1").
@@ -318,13 +314,13 @@ func TestGetBlueprint(t *testing.T) {
 				patchHelperFactory:        dryRunPatchHelperFactory(fakeClient),
 				UnstructuredCachingClient: fakeClient,
 			}
-			got, err := r.getBlueprint(ctx, scope.New(cluster).Current.Cluster)
+			got, err := r.getBlueprint(ctx, scope.New(cluster).Current.Cluster, tt.clusterClass)
 
 			// Checks the return error.
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 
 			if tt.want == nil {

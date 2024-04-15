@@ -17,12 +17,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// main is the main package for Tilt Prepare.
 package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +35,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
-	"golang.org/x/net/context"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,11 +47,13 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/kustomize/api/types"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/cluster"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
+	logf "sigs.k8s.io/cluster-api/cmd/clusterctl/log"
 	"sigs.k8s.io/cluster-api/test/infrastructure/container"
 	utilyaml "sigs.k8s.io/cluster-api/util/yaml"
 )
@@ -57,45 +61,78 @@ import (
 /*
 Example call for tilt up:
 	--tools kustomize,envsubst
-	--cert-manager
-	--kustomize-builds clusterctl.crd:./cmd/clusterctl/config/crd/
-	--kustomize-builds observability.tools:./hack/observability/
-	--providers core:.
-	--providers kubeadm-bootstrap:./bootstrap/kubeadm
-	--providers kubeadm-control-plane:./controlplane/kubeadm
-	--providers docker:./test/infrastructure/docker
 */
 
-var (
-	rootPath      string
-	tiltBuildPath string
-
-	toolsFlag            = pflag.StringSlice("tools", []string{}, "list of tools to be created; each value should correspond to a make target")
-	certManagerFlag      = pflag.Bool("cert-manager", false, "prepare cert-manager")
-	kustomizeBuildsFlag  = pflag.StringSlice("kustomize-builds", []string{}, "list of kustomize build to be run; each value should be in the form name:path")
-	providersBuildsFlag  = pflag.StringSlice("providers", []string{}, "list of providers to be installed; each value should be in the form name:path")
-	allowK8SContextsFlag = pflag.StringSlice("allow-k8s-contexts", []string{}, "Specifies that Tilt is allowed to run against the specified k8s context name; Kind is automatically allowed")
-	tiltSettingsFileFlag = pflag.String("tilt-settings-file", "./tilt-settings.yaml", "Path to a tilt-settings.(json|yaml) file")
+const (
+	kustomizePath = "./hack/tools/bin/kustomize"
+	envsubstPath  = "./hack/tools/bin/envsubst"
 )
 
+var (
+	// Defines the default version to be used for the provider CR if no version is specified in the tilt-provider.yaml|json file.
+	defaultProviderVersion = "v1.5.99"
+
+	// This data struct mirrors a subset of info from the providers struct in the tilt file
+	// which is containing "hard-coded" tilt-provider.yaml files for the providers managed in the Cluster API repository.
+	providers = map[string]tiltProviderConfig{
+		"core": {
+			Context: pointer.String("."),
+		},
+		"kubeadm-bootstrap": {
+			Context: pointer.String("bootstrap/kubeadm"),
+		},
+		"kubeadm-control-plane": {
+			Context: pointer.String("controlplane/kubeadm"),
+		},
+		"docker": {
+			Context: pointer.String("test/infrastructure/docker"),
+		},
+		"in-memory": {
+			Context: pointer.String("test/infrastructure/inmemory"),
+		},
+		"test-extension": {
+			Context: pointer.String("test/extension"),
+		},
+	}
+
+	rootPath             string
+	tiltBuildPath        string
+	tiltSettingsFileFlag = pflag.String("tilt-settings-file", "./tilt-settings.yaml", "Path to a tilt-settings.(json|yaml) file")
+	toolsFlag            = pflag.StringSlice("tools", []string{}, "list of tools to be created; each value should correspond to a make target")
+)
+
+// Types used to de-serialize the tilt-settings.yaml/json file from the Cluster API repository.
+
 type tiltSettings struct {
-	Debug     map[string]debugConfig `json:"debug,omitempty"`
-	ExtraArgs map[string]extraArgs   `json:"extra_args,omitempty"`
+	Debug               map[string]tiltSettingsDebugConfig `json:"debug,omitempty"`
+	ExtraArgs           map[string]tiltSettingsExtraArgs   `json:"extra_args,omitempty"`
+	DeployCertManager   *bool                              `json:"deploy_cert_manager,omitempty"`
+	DeployObservability []string                           `json:"deploy_observability,omitempty"`
+	EnableProviders     []string                           `json:"enable_providers,omitempty"`
+	AllowedContexts     []string                           `json:"allowed_contexts,omitempty"`
+	ProviderRepos       []string                           `json:"provider_repos,omitempty"`
 }
 
-type debugConfig struct {
+type tiltSettingsDebugConfig struct {
 	Continue     *bool `json:"continue"`
 	Port         *int  `json:"port"`
 	ProfilerPort *int  `json:"profiler_port"`
 	MetricsPort  *int  `json:"metrics_port"`
 }
 
-type extraArgs []string
+type tiltSettingsExtraArgs []string
 
-const (
-	kustomizePath = "./hack/tools/bin/kustomize"
-	envsubstPath  = "./hack/tools/bin/envsubst"
-)
+// Types used to de-serialize the tilt-providers.yaml/json file from the provider repositories.
+
+type tiltProvider struct {
+	Name   string              `json:"name,omitempty"`
+	Config *tiltProviderConfig `json:"config,omitempty"`
+}
+
+type tiltProviderConfig struct {
+	Context *string `json:"context,omitempty"`
+	Version *string `json:"version,omitempty"`
+}
 
 func init() {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
@@ -114,19 +151,27 @@ func init() {
 // This tool aims to speed up tilt startup time by running in parallel a set of task
 // preparing everything is required for tilt up.
 func main() {
+	// Set clusterctl logger with a log level of 5.
+	// This makes it easier to see what clusterctl is doing and to debug it.
+	logf.SetLogger(logf.NewLogger(logf.WithThreshold(pointer.Int(5))))
+
+	// Set controller-runtime logger as well.
+	ctrl.SetLogger(klog.Background())
+
 	klog.Infof("[main] started\n")
 	start := time.Now()
 
 	pflag.Parse()
-	if err := allowK8sConfig(); err != nil {
-		klog.Exit(fmt.Sprintf("[main] tilt-prepare can't start: %v", err))
-	}
 
 	ctx := ctrl.SetupSignalHandler()
 
 	ts, err := readTiltSettings(*tiltSettingsFileFlag)
 	if err != nil {
 		klog.Exit(fmt.Sprintf("[main] failed to read tilt settings: %v", err))
+	}
+
+	if err := allowK8sConfig(ts); err != nil {
+		klog.Exit(fmt.Sprintf("[main] tilt-prepare can't start: %v", err))
 	}
 
 	// Execute a first group of tilt prepare tasks, building all the tools required in subsequent steps/by tilt.
@@ -161,25 +206,29 @@ func readTiltSettings(path string) (*tiltSettings, error) {
 		return nil, errors.Wrap(err, "failed to unmarshal tilt-settings content")
 	}
 
-	setDebugDefaults(ts)
+	setTiltSettingsDefaults(ts)
 	return ts, nil
 }
 
-// setDebugDefaults sets default values for debug related fields in tiltSettings.
-func setDebugDefaults(ts *tiltSettings) {
+// setTiltSettingsDefaults sets default values for tiltSettings info.
+func setTiltSettingsDefaults(ts *tiltSettings) {
+	if ts.DeployCertManager == nil {
+		ts.DeployCertManager = pointer.Bool(true)
+	}
+
 	for k := range ts.Debug {
 		p := ts.Debug[k]
 		if p.Continue == nil {
-			p.Continue = pointer.BoolPtr(true)
+			p.Continue = pointer.Bool(true)
 		}
 		if p.Port == nil {
-			p.Port = pointer.IntPtr(0)
+			p.Port = pointer.Int(0)
 		}
 		if p.ProfilerPort == nil {
-			p.ProfilerPort = pointer.IntPtr(0)
+			p.ProfilerPort = pointer.Int(0)
 		}
 		if p.MetricsPort == nil {
-			p.MetricsPort = pointer.IntPtr(0)
+			p.MetricsPort = pointer.Int(0)
 		}
 
 		ts.Debug[k] = p
@@ -187,26 +236,26 @@ func setDebugDefaults(ts *tiltSettings) {
 }
 
 // allowK8sConfig mimics allow_k8s_contexts; only kind is enabled by default but more can be added.
-func allowK8sConfig() error {
+func allowK8sConfig(ts *tiltSettings) error {
 	config, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
 	if err != nil {
-		return errors.Wrap(err, "failed to load Kubeconfig")
+		return errors.Wrap(err, "failed to load KubeConfig file")
 	}
 
 	if config.CurrentContext == "" {
-		return errors.New("failed to get current context")
+		return errors.New("failed to get current context from the KubeConfig file")
 	}
 	context, ok := config.Contexts[config.CurrentContext]
 	if !ok {
-		return errors.Errorf("failed to get context %s", config.CurrentContext)
+		return errors.Errorf("failed to get context %s from the KubeConfig file", config.CurrentContext)
 	}
 	if strings.HasPrefix(context.Cluster, "kind-") {
 		return nil
 	}
 
-	allowed := sets.NewString(*allowK8SContextsFlag...)
+	allowed := sets.Set[string]{}.Insert(ts.AllowedContexts...)
 	if !allowed.Has(config.CurrentContext) {
-		return errors.Errorf("context %s is not allowed", config.CurrentContext)
+		return errors.Errorf("context %s from the KubeConfig file is not allowed", config.CurrentContext)
 	}
 	return nil
 }
@@ -227,42 +276,143 @@ func tiltTools(ctx context.Context) error {
 func tiltResources(ctx context.Context, ts *tiltSettings) error {
 	tasks := map[string]taskFunction{}
 
+	// Note: we are creating clusterctl CRDs using kustomize (vs using clusterctl) because we want to create
+	// a dependency between these resources and provider resources.
+	tasks["clusterctl.crd"] = kustomizeTask("./cmd/clusterctl/config/crd/", "clusterctl.crd.yaml")
+
 	// If required, all the task to install cert manager.
 	// NOTE: strictly speaking cert-manager is not a resource, however it is a dependency for most of the actual resources
 	// and running this is the same task group of the kustomize/provider tasks gives the maximum benefits in terms of reducing the total elapsed time.
-	if *certManagerFlag {
-		tasks["cert-manager-cainjector"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-cainjector:%s", config.CertManagerDefaultVersion))
-		tasks["cert-manager-webhook"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-webhook:%s", config.CertManagerDefaultVersion))
-		tasks["cert-manager-controller"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-controller:%s", config.CertManagerDefaultVersion))
+	if ts.DeployCertManager == nil || *ts.DeployCertManager {
+		cfg, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+		if err != nil {
+			return errors.Wrap(err, "failed to load KubeConfig file")
+		}
+		// The images can only be preloaded when the cluster is a kind cluster.
+		// Note: Not repeating the validation on the config already done in allowK8sConfig here.
+		if strings.HasPrefix(cfg.Contexts[cfg.CurrentContext].Cluster, "kind-") {
+			tasks["cert-manager-cainjector"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-cainjector:%s", config.CertManagerDefaultVersion))
+			tasks["cert-manager-webhook"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-webhook:%s", config.CertManagerDefaultVersion))
+			tasks["cert-manager-controller"] = preLoadImageTask(fmt.Sprintf("quay.io/jetstack/cert-manager-controller:%s", config.CertManagerDefaultVersion))
+		}
 		tasks["cert-manager"] = certManagerTask()
 	}
 
-	// Add a kustomize task for each name/path defined using the --kustomize-build flag.
-	for _, k := range *kustomizeBuildsFlag {
-		values := strings.Split(k, ":")
-		if len(values) != 2 {
-			return errors.Errorf("[resources] failed to parse --kustomize-build flag %s: value should be in the form of name:path", k)
-		}
-		name := values[0]
-		path := values[1]
-		tasks[name] = kustomizeTask(path, fmt.Sprintf("%s.yaml", name))
+	// Add a kustomize task for each tool configured via deploy_observability.
+	for _, tool := range ts.DeployObservability {
+		name := fmt.Sprintf("%s.observability", tool)
+		path := fmt.Sprintf("./hack/observability/%s/", tool)
+		tasks[name] = sequential(
+			cleanupChartTask(path),
+			kustomizeTask(path, fmt.Sprintf("%s.yaml", name)),
+		)
 	}
 
-	// Add a provider task for each name/path defined using the --provider flag.
-	for _, p := range *providersBuildsFlag {
-		pValues := strings.Split(p, ":")
-		if len(pValues) != 2 {
-			return errors.Errorf("[resources] failed to parse --provider flag %s: value should be in the form of name:path", p)
+	// Add read configurations from provider repos
+	for _, p := range ts.ProviderRepos {
+		tiltProviderConfigs, err := loadTiltProvider(p)
+		if err != nil {
+			return errors.Wrapf(err, "failed to load tilt-provider.yaml/json from %s", p)
 		}
-		name := pValues[0]
-		path := pValues[1]
-		tasks[name] = providerTask(name, fmt.Sprintf("%s/config/default", path), ts)
+
+		for name, config := range tiltProviderConfigs {
+			providers[name] = config
+		}
+	}
+
+	enableCore := false
+	for _, providerName := range ts.EnableProviders {
+		if providerName == "core" {
+			enableCore = true
+		}
+	}
+	if !enableCore {
+		ts.EnableProviders = append(ts.EnableProviders, "core")
+	}
+
+	// Add the provider task for each of the enabled provider
+	for _, providerName := range ts.EnableProviders {
+		config, ok := providers[providerName]
+		if !ok {
+			return errors.Errorf("failed to obtain config for the provider %s, please add the providers path to the provider_repos list in tilt-settings.yaml/json file", providerName)
+		}
+		tasks[providerName] = workloadTask(providerName, "provider", "manager", "manager", ts, fmt.Sprintf("%s/config/default", *config.Context), getProviderObj(config.Version))
 	}
 
 	return runTaskGroup(ctx, "resources", tasks)
 }
 
+func loadTiltProvider(providerRepository string) (map[string]tiltProviderConfig, error) {
+	tiltProviders, err := readTiltProvider(providerRepository)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[string]tiltProviderConfig)
+	for _, p := range tiltProviders {
+		if p.Config == nil {
+			return nil, errors.Errorf("tilt-provider.yaml/json file from %s does not contain a config section for provider %s", providerRepository, p.Name)
+		}
+
+		// Resolving context, that is a relative path to the repository where the tilt-provider is defined
+		contextPath := filepath.Join(providerRepository, pointer.StringDeref(p.Config.Context, "."))
+
+		ret[p.Name] = tiltProviderConfig{
+			Context: &contextPath,
+			Version: p.Config.Version,
+		}
+	}
+	return ret, nil
+}
+
+func readTiltProvider(path string) ([]tiltProvider, error) {
+	path, err := addTiltProviderFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	content, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+
+	ps := []tiltProvider{}
+	// providerSettings file can be an array and this is done to detect arrays
+	if strings.HasPrefix(string(content), "[") || strings.HasPrefix(string(content), "-") {
+		if err := yaml.Unmarshal(content, &ps); err != nil {
+			return nil, errors.Wrap(err, fmt.Sprintf("failed to read provider path %s tilt file", path))
+		}
+	} else {
+		p := tiltProvider{}
+		if err := yaml.Unmarshal(content, &p); err != nil {
+			return nil, errors.Wrap(err, fmt.Sprintf("failed to read provider path %s tilt file", path))
+		}
+		ps = append(ps, p)
+	}
+	return ps, nil
+}
+
+func addTiltProviderFile(path string) (string, error) {
+	pathAndFile := filepath.Join(path, "tilt-provider.yaml")
+	if _, err := os.Stat(pathAndFile); err == nil {
+		return pathAndFile, nil
+	}
+	pathAndFile = filepath.Join(path, "tilt-provider.json")
+	if _, err := os.Stat(pathAndFile); err == nil {
+		return pathAndFile, nil
+	}
+	return "", errors.Errorf("unable to find a tilt-provider.yaml|json file under %s", path)
+}
+
 type taskFunction func(ctx context.Context, prefix string, errors chan error)
+
+func sequential(tasks ...taskFunction) taskFunction {
+	return func(ctx context.Context, prefix string, errors chan error) {
+		for _, task := range tasks {
+			task(ctx, prefix, errors)
+		}
+	}
+}
 
 // runTaskGroup executes a group of task in parallel handling an error channel.
 func runTaskGroup(ctx context.Context, name string, tasks map[string]taskFunction) error {
@@ -277,6 +427,7 @@ func runTaskGroup(ctx context.Context, name string, tasks map[string]taskFunctio
 
 	// Create a context to be used for canceling all the tasks when another fails.
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// Make channels to pass fatal errors in WaitGroup
 	errors := make(chan error)
@@ -410,6 +561,84 @@ func certManagerTask() taskFunction {
 	}
 }
 
+// chartFile represents a Chart.yaml.
+type chartFile struct {
+	Version string `json:"version"`
+}
+
+// cleanupChartTask ensures we are using the required version of a chart by cleaning up
+// outdated charts below the given path. This is necessary because kustomize just
+// uses a local Chart if it exists, no matter if it matches the required version or not.
+func cleanupChartTask(path string) taskFunction {
+	return func(ctx context.Context, prefix string, errCh chan error) {
+		err := filepath.WalkDir(path, func(path string, d fs.DirEntry, _ error) error {
+			if !strings.HasSuffix(path, "kustomization.yaml") {
+				return nil
+			}
+
+			// Read kustomization file.
+			kustomizationFileBytes, err := os.ReadFile(path) //nolint:gosec
+			if err != nil {
+				return err
+			}
+
+			kustomizationFileContent := types.Kustomization{}
+			if err := yaml.Unmarshal(kustomizationFileBytes, &kustomizationFileContent); err != nil {
+				return err
+			}
+
+			baseDir := filepath.Dir(path)
+
+			// Iterate through helmCharts in the kustomization.yaml and cleanup outdated charts.
+			for _, helmChart := range kustomizationFileContent.HelmCharts {
+				chartsDir := filepath.Join(baseDir, "charts")
+				chartDir := filepath.Join(chartsDir, helmChart.Name)
+				chartYAMLPath := filepath.Join(chartDir, "Chart.yaml")
+
+				if _, err := os.Stat(chartYAMLPath); err != nil && errors.Is(err, os.ErrNotExist) {
+					// Continue if there is no cached Chart.
+					continue
+				}
+
+				helmChartVersion := helmChart.Version
+				if helmChartVersion == "" {
+					return errors.New("Helm Chart version must be set")
+				}
+
+				// Read Chart.yaml
+				chartFileBytes, err := os.ReadFile(chartYAMLPath) //nolint:gosec
+				if err != nil {
+					return err
+				}
+				chartFileContent := chartFile{}
+				if err := yaml.Unmarshal(chartFileBytes, &chartFileContent); err != nil {
+					return err
+				}
+
+				// Remove the local cached Chart if it is outdated.
+				if helmChartVersion != chartFileContent.Version {
+					klog.Infof("[%s] local Helm Chart is outdated (%s != %s), deleting cached chart...\n", prefix, helmChartVersion, chartFileContent.Version)
+					// Delete dir, e.g. hack/observability/visualizer/charts/cluster-api-visualizer
+					if err := os.RemoveAll(chartDir); err != nil {
+						return err
+					}
+					// Delete file, e.g. hack/observability/visualizer/charts/cluster-api-visualizer-1.0.0.tgz
+					if err := os.Remove(filepath.Join(chartsDir, fmt.Sprintf("%s-%s.tgz", helmChart.Name, chartFileContent.Version))); err != nil {
+						return err
+					}
+				} else {
+					klog.Infof("[%s] local Helm Chart already has the right version (%s)\n", prefix, helmChartVersion)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			errCh <- errors.Wrapf(err, "failed to cleanup Chart dir %q", path)
+		}
+	}
+}
+
 // kustomizeTask generates a task for running kustomize build on a path and saving the output on a file.
 func kustomizeTask(path, out string) taskFunction {
 	return func(ctx context.Context, prefix string, errCh chan error) {
@@ -433,17 +662,16 @@ func kustomizeTask(path, out string) taskFunction {
 		}
 
 		// TODO: consider if to preload images into kind, this will speed up components startup.
-
 		if err := writeIfChanged(prefix, filepath.Join(tiltBuildPath, "yaml", out), stdout.Bytes()); err != nil {
 			errCh <- err
 		}
 	}
 }
 
-// providerTask generates a task for creating the component yal for a provider and saving the output on a file.
+// workloadTask generates a task for creating the component yaml for a workload and saving the output on a file.
 // NOTE: This task has several sub steps including running kustomize, envsubst, fixing components for debugging,
-// and adding the Provider resource mimicking what clusterctl init does.
-func providerTask(name, path string, ts *tiltSettings) taskFunction {
+// and adding the workload resource mimicking what clusterctl init does.
+func workloadTask(name, workloadType, binaryName, containerName string, ts *tiltSettings, path string, getAdditionalObject func(string, []unstructured.Unstructured) (*unstructured.Unstructured, error)) taskFunction {
 	return func(ctx context.Context, prefix string, errCh chan error) {
 		kustomizeCmd := exec.CommandContext(ctx, kustomizePath, "build", path)
 		var stdout1, stderr1 bytes.Buffer
@@ -471,17 +699,28 @@ func providerTask(name, path string, ts *tiltSettings) taskFunction {
 			errCh <- errors.Wrapf(err, "[%s] failed parse components yaml", prefix)
 			return
 		}
-		if err := prepareManagerDeployment(name, prefix, objs, ts); err != nil {
+
+		if err := prepareWorkload(name, prefix, binaryName, containerName, objs, ts); err != nil {
 			errCh <- err
 			return
+		}
+		if getAdditionalObject != nil {
+			additionalObject, err := getAdditionalObject(prefix, objs)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			objs = append(objs, *additionalObject)
 		}
 
-		providerObj, err := getProviderObj(prefix, objs)
-		if err != nil {
-			errCh <- err
-			return
+		for _, o := range objs {
+			labels := o.GetLabels()
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels[clusterctlv1.ClusterctlLabel] = ""
+			o.SetLabels(labels)
 		}
-		objs = append(objs, *providerObj)
 
 		yaml, err := utilyaml.FromUnstructured(objs)
 		if err != nil {
@@ -489,7 +728,7 @@ func providerTask(name, path string, ts *tiltSettings) taskFunction {
 			return
 		}
 
-		if err := writeIfChanged(prefix, filepath.Join(tiltBuildPath, "yaml", fmt.Sprintf("%s.provider.yaml", name)), yaml); err != nil {
+		if err := writeIfChanged(prefix, filepath.Join(tiltBuildPath, "yaml", fmt.Sprintf("%s.%s.yaml", name, workloadType)), yaml); err != nil {
 			errCh <- err
 		}
 	}
@@ -525,23 +764,27 @@ func writeIfChanged(prefix string, path string, yaml []byte) error {
 	return nil
 }
 
-// prepareManagerDeployment sets the Command and Args for the manager container according to the given tiltSettings.
-// If there is a debug config given for the provider, we modify Command and Args to work nicely with the delve debugger.
-// If there are extra_args given for the provider, we append those to the ones that already exist in the deployment.
+// prepareWorkload sets the Command and Args for the manager container according to the given tiltSettings.
+// If there is a debug config given for the workload, we modify Command and Args to work nicely with the delve debugger.
+// If there are extra_args given for the workload, we append those to the ones that already exist in the deployment.
 // This has the affect that the appended ones will take precedence, as those are read last.
 // Finally, we modify the deployment to enable prometheus metrics scraping.
-func prepareManagerDeployment(name, prefix string, objs []unstructured.Unstructured, ts *tiltSettings) error {
-	return updateDeployment(prefix, objs, func(d *appsv1.Deployment) {
-		for j, container := range d.Spec.Template.Spec.Containers {
-			if container.Name != "manager" {
-				// as defined in clusterctl Provider Contract "Controllers & Watching namespace"
+func prepareWorkload(name, prefix, binaryName, containerName string, objs []unstructured.Unstructured, ts *tiltSettings) error {
+	return updateDeployment(prefix, objs, func(deployment *appsv1.Deployment) {
+		for j, container := range deployment.Spec.Template.Spec.Containers {
+			if container.Name != containerName {
 				continue
 			}
-
-			cmd := []string{"sh", "/start.sh", "/manager"}
+			cmd := []string{"sh", "/start.sh", "/" + binaryName}
 			args := append(container.Args, []string(ts.ExtraArgs[name])...)
 
-			// alter controller deployment for working nicely with delve debugger;
+			// remove securityContext for tilt live_update, see https://github.com/tilt-dev/tilt/issues/3060
+			container.SecurityContext = nil
+			// ensure it's also removed from the pod template matching this container
+			// setting this outside the loop would means altering every deployments
+			deployment.Spec.Template.Spec.SecurityContext = nil
+
+			// alter deployment for working nicely with delve debugger;
 			// most specifically, configuring delve, starting the manager with profiling enabled, dropping liveness and
 			// readiness probes and disabling leader election.
 			if d, ok := ts.Debug[name]; ok {
@@ -554,7 +797,7 @@ func prepareManagerDeployment(name, prefix string, objs []unstructured.Unstructu
 					cmd = append(cmd, "--continue")
 				}
 
-				cmd = append(cmd, []string{"--", "/manager"}...)
+				cmd = append(cmd, []string{"--", "/" + binaryName}...)
 
 				if d.ProfilerPort != nil && *d.ProfilerPort > 0 {
 					args = append(args, []string{"--profiler-address=:6060"}...)
@@ -563,16 +806,23 @@ func prepareManagerDeployment(name, prefix string, objs []unstructured.Unstructu
 				debugArgs := make([]string, 0, len(args))
 				for _, a := range args {
 					if a == "--leader-elect" || a == "--leader-elect=true" {
-						continue
+						a = "--leader-elect=false"
 					}
 					debugArgs = append(debugArgs, a)
 				}
 				args = debugArgs
 
+				// Set annotation to point parca to the profiler port.
+				if d.ProfilerPort != nil && *d.ProfilerPort > 0 {
+					if deployment.Spec.Template.Annotations == nil {
+						deployment.Spec.Template.Annotations = map[string]string{}
+					}
+					deployment.Spec.Template.Annotations["parca.dev/port"] = "6060"
+				}
+
 				container.LivenessProbe = nil
 				container.ReadinessProbe = nil
 			}
-
 			// alter the controller deployment for working nicely with prometheus metrics scraping. Specifically, the
 			// metrics endpoint is set to listen on all interfaces instead of only localhost, and another port is added
 			// to the container to expose the metrics endpoint.
@@ -590,10 +840,10 @@ func prepareManagerDeployment(name, prefix string, objs []unstructured.Unstructu
 				ContainerPort: 8080,
 				Protocol:      "TCP",
 			})
+
 			container.Command = cmd
 			container.Args = finalArgs
-
-			d.Spec.Template.Spec.Containers[j] = container
+			deployment.Spec.Template.Spec.Containers[j] = container
 		}
 	})
 }
@@ -628,19 +878,27 @@ func updateDeployment(prefix string, objs []unstructured.Unstructured, f updateD
 	return nil
 }
 
-func getProviderObj(prefix string, objs []unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	namespace := ""
-	manifestLabel := ""
-	for i := range objs {
-		if objs[i].GetKind() != "Namespace" {
-			continue
+func getProviderObj(version *string) func(prefix string, objs []unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	return func(prefix string, objs []unstructured.Unstructured) (*unstructured.Unstructured, error) {
+		namespace := ""
+		manifestLabel := ""
+		for i := range objs {
+			if objs[i].GetKind() != "Namespace" {
+				continue
+			}
+
+			namespace = objs[i].GetName()
+			manifestLabel = objs[i].GetLabels()[clusterv1.ProviderNameLabel]
+			break
 		}
 
-		namespace = objs[i].GetName()
-		manifestLabel = objs[i].GetLabels()[clusterv1.ProviderLabelName]
-		break
-	}
+		if manifestLabel == "" {
+			return nil, errors.Errorf(
+				"Could not find any Namespace object with label %s and therefore failed to deduce provider name and type",
+				clusterv1.ProviderNameLabel)
+		}
 
+<<<<<<< HEAD
 	if manifestLabel == "" {
 		return nil, errors.Errorf(
 			"Could not find any Namespace object with label %s and therefore failed to deduce provider name and type",
@@ -661,29 +919,58 @@ func getProviderObj(prefix string, objs []unstructured.Unstructured) (*unstructu
 		providerType = "ControlPlaneProvider"
 		providerName = manifestLabel[len("control-plane-"):]
 	}
+=======
+		providerType := string(clusterctlv1.CoreProviderType)
+		providerName := manifestLabel
+		if strings.HasPrefix(manifestLabel, "infrastructure-") {
+			providerType = string(clusterctlv1.InfrastructureProviderType)
+			providerName = manifestLabel[len("infrastructure-"):]
+		}
+		if strings.HasPrefix(manifestLabel, "bootstrap-") {
+			providerType = string(clusterctlv1.BootstrapProviderType)
+			providerName = manifestLabel[len("bootstrap-"):]
+		}
+		if strings.HasPrefix(manifestLabel, "control-plane-") {
+			providerType = string(clusterctlv1.ControlPlaneProviderType)
+			providerName = manifestLabel[len("control-plane-"):]
+		}
+		if strings.HasPrefix(manifestLabel, "ipam-") {
+			providerType = string(clusterctlv1.IPAMProviderType)
+			providerName = manifestLabel[len("ipam-"):]
+		}
+		if strings.HasPrefix(manifestLabel, "runtime-extension-") {
+			providerType = string(clusterctlv1.RuntimeExtensionProviderType)
+			providerName = manifestLabel[len("runtime-extension-"):]
+		}
+		if strings.HasPrefix(manifestLabel, "addon-") {
+			providerType = string(clusterctlv1.AddonProviderType)
+			providerName = manifestLabel[len("addon-"):]
+		}
+>>>>>>> v1.5.7
 
-	provider := &clusterctlv1.Provider{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Provider",
-			APIVersion: clusterctlv1.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      manifestLabel,
-			Namespace: namespace,
-			Labels: map[string]string{
-				clusterv1.ProviderLabelName:          manifestLabel,
-				clusterctlv1.ClusterctlLabelName:     "",
-				clusterctlv1.ClusterctlCoreLabelName: clusterctlv1.ClusterctlCoreLabelInventoryValue,
+		provider := &clusterctlv1.Provider{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Provider",
+				APIVersion: clusterctlv1.GroupVersion.String(),
 			},
-		},
-		ProviderName: providerName,
-		Type:         providerType,
-		Version:      "v1.2.99",
-	}
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      manifestLabel,
+				Namespace: namespace,
+				Labels: map[string]string{
+					clusterv1.ProviderNameLabel:      manifestLabel,
+					clusterctlv1.ClusterctlLabel:     "",
+					clusterctlv1.ClusterctlCoreLabel: clusterctlv1.ClusterctlCoreLabelInventoryValue,
+				},
+			},
+			ProviderName: providerName,
+			Type:         providerType,
+			Version:      pointer.StringDeref(version, defaultProviderVersion),
+		}
 
-	providerObj := &unstructured.Unstructured{}
-	if err := scheme.Scheme.Convert(provider, providerObj, nil); err != nil {
-		return nil, errors.Wrapf(err, "[%s] failed to convert Provider to unstructured", prefix)
+		providerObj := &unstructured.Unstructured{}
+		if err := scheme.Scheme.Convert(provider, providerObj, nil); err != nil {
+			return nil, errors.Wrapf(err, "[%s] failed to convert Provider to unstructured", prefix)
+		}
+		return providerObj, nil
 	}
-	return providerObj, nil
 }

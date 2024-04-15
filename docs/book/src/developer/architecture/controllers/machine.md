@@ -10,7 +10,7 @@ The Machine controller's main responsibilities are:
     * The associated InfrastructureMachine object.
 * Copy data from `BootstrapConfig.Status.DataSecretName` to `Machine.Spec.Bootstrap.DataSecretName` if
 `Machine.Spec.Bootstrap.DataSecretName` is empty.
-* Setting NodeRefs to be able to associate machines and kubernetes nodes.
+* Setting NodeRefs to be able to associate machines and Kubernetes nodes.
 * Deleting Nodes in the target cluster when the associated machine is deleted.
 * Cleanup of related objects.
 * Keeping the Machine's Status object up to date with the InfrastructureMachine's Status object.
@@ -81,6 +81,12 @@ The `spec` object **must** at least one field defined:
 
 * `providerID` - a cloud provider ID identifying the machine.
 
+#### Optional `spec` fields
+
+The `spec` object **may** define several fields that do not affect functionality if missing:
+
+* `failureDomain` - is a string identifying the failure domain the instance is running in.
+
 #### Required `status` fields
 
 The `status` object **must** at least one field defined:
@@ -93,6 +99,11 @@ The `status` object **may** define several fields that do not affect functionali
 
 * `failureReason` - is a string that explains why a fatal error has occurred, if possible.
 * `failureMessage` - is a string that holds the message contained by the error.
+* `addresses` - is a `MachineAddresses` (a list of `MachineAddress`) which represents host names, external IP addresses, internal IP addresses,
+external DNS names, and/or internal DNS names for the provider's machine instance. `MachineAddress` is
+defined as:
+    - `type` (string): one of `Hostname`, `ExternalIP`, `InternalIP`, `ExternalDNS`, `InternalDNS`
+    - `address` (string)
 
 Example:
 ```yaml

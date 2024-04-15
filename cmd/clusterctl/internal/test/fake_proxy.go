@@ -35,6 +35,7 @@ import (
 	fakecontrolplane "sigs.k8s.io/cluster-api/cmd/clusterctl/internal/test/providers/controlplane"
 	fakeexternal "sigs.k8s.io/cluster-api/cmd/clusterctl/internal/test/providers/external"
 	fakeinfrastructure "sigs.k8s.io/cluster-api/cmd/clusterctl/internal/test/providers/infrastructure"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	addonsv1 "sigs.k8s.io/cluster-api/exp/addons/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 )
@@ -57,6 +58,7 @@ func init() {
 	_ = expv1.AddToScheme(FakeScheme)
 	_ = addonsv1.AddToScheme(FakeScheme)
 	_ = apiextensionsv1.AddToScheme(FakeScheme)
+	_ = controlplanev1.AddToScheme(FakeScheme)
 
 	_ = fakebootstrap.AddToScheme(FakeScheme)
 	_ = fakecontrolplane.AddToScheme(FakeScheme)
@@ -136,11 +138,11 @@ func (f *FakeProxy) ListResources(labels map[string]string, namespaces ...string
 	return ret, nil
 }
 
-func (f *FakeProxy) GetContexts(prefix string) ([]string, error) {
+func (f *FakeProxy) GetContexts(_ string) ([]string, error) {
 	return nil, nil
 }
 
-func (f *FakeProxy) GetResourceNames(groupVersion, kind string, options []client.ListOption, prefix string) ([]string, error) {
+func (f *FakeProxy) GetResourceNames(_, _ string, _ []client.ListOption, _ string) ([]string, error) {
 	return nil, nil
 }
 
@@ -162,7 +164,7 @@ func (f *FakeProxy) WithNamespace(n string) *FakeProxy {
 
 // WithProviderInventory can be used as a fast track for setting up test scenarios requiring an already initialized management cluster.
 // NB. this method adds an items to the Provider inventory, but it doesn't install the corresponding provider; if the
-// test case requires the actual provider to be installed, use the the fake client to install both the provider
+// test case requires the actual provider to be installed, use the fake client to install both the provider
 // components and the corresponding inventory item.
 func (f *FakeProxy) WithProviderInventory(name string, providerType clusterctlv1.ProviderType, version, targetNamespace string) *FakeProxy {
 	f.objs = append(f.objs, &clusterctlv1.Provider{
@@ -175,9 +177,9 @@ func (f *FakeProxy) WithProviderInventory(name string, providerType clusterctlv1
 			Namespace:       targetNamespace,
 			Name:            clusterctlv1.ManifestLabel(name, providerType),
 			Labels: map[string]string{
-				clusterctlv1.ClusterctlLabelName:     "",
-				clusterv1.ProviderLabelName:          clusterctlv1.ManifestLabel(name, providerType),
-				clusterctlv1.ClusterctlCoreLabelName: clusterctlv1.ClusterctlCoreLabelInventoryValue,
+				clusterctlv1.ClusterctlLabel:     "",
+				clusterv1.ProviderNameLabel:      clusterctlv1.ManifestLabel(name, providerType),
+				clusterctlv1.ClusterctlCoreLabel: clusterctlv1.ClusterctlCoreLabelInventoryValue,
 			},
 		},
 		ProviderName: name,

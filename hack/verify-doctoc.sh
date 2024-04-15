@@ -18,14 +18,18 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+if [[ "${TRACE-0}" == "1" ]]; then
+    set -o xtrace
+fi
+
 command -v doctoc || echo "doctoc is not available on your system, skipping verification" && exit 0
 
 doctoc_files="README.md \
               CONTRIBUTING.md \
               cmd/clusterctl/README.md \
+              docs/release/release-tasks.md \
               docs/scope-and-objectives.md \
               docs/staging-use-cases.md \
-              docs/developer/releasing.md \
               docs/proposals/20181121-machine-api.md \
               docs/proposals/20190610-machine-states-preboot-bootstrapping.md \
               docs/proposals/YYYYMMDD-template.md"

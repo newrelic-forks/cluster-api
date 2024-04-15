@@ -112,6 +112,14 @@ To access provider specific information, such as the components YAML to be used 
 `clusterctl init` accesses the **provider repositories**, that are well-known places where the release assets for
 a provider are published.
 
+Per default `clusterctl` will use a go proxy to detect the available versions to prevent additional
+API calls to the GitHub API. It is possible to configure the go proxy url using the `GOPROXY` variable as
+for go itself (defaults to `https://proxy.golang.org`).
+To immediately fallback to the GitHub client and not use a go proxy, the environment variable could get set to
+`GOPROXY=off` or `GOPROXY=direct`.
+If a provider does not follow Go's semantic versioning, `clusterctl` may fail when detecting the correct version.
+In such cases, disabling the go proxy functionality via `GOPROXY=off` should be considered.
+
 See [clusterctl configuration](../configuration.md) for more info about provider repository configurations.
 
 <aside class="note">
@@ -119,10 +127,10 @@ See [clusterctl configuration](../configuration.md) for more info about provider
 <h1> Is it possible to override files read from a provider repository? </h1>
 
 If, for any reasons, the user wants to replace the assets available on a provider repository with a locally available asset,
-the user is required to save the file under `$HOME/.cluster-api/overrides/<provider-label>/<version>/<file-name.yaml>`.
+the user is required to save the file under `$XDG_CONFIG_HOME/cluster-api/overrides/<provider-label>/<version>/<file-name.yaml>`.
 
 ```bash
-$HOME/.cluster-api/overrides/infrastructure-aws/v0.5.2/infrastructure-components.yaml
+$XDG_CONFIG_HOME/cluster-api/overrides/infrastructure-aws/v0.5.2/infrastructure-components.yaml
 ```
 
 </aside>
@@ -182,7 +190,11 @@ If this happens, there are no guarantees about the proper functioning of `cluste
 Cluster API providers require a cert-manager version supporting the `cert-manager.io/v1` API to be installed in the cluster.
 
 While doing init, clusterctl checks if there is a version of cert-manager already installed. If not, clusterctl will
+<<<<<<< HEAD
 install a default version (currently cert-manager v1.9.1). See [clusterctl configuration](../configuration.md) for
+=======
+install a default version (currently cert-manager v1.14.2). See [clusterctl configuration](../configuration.md) for
+>>>>>>> v1.5.7
 available options to customize this operation.
 
 <aside class="note warning">

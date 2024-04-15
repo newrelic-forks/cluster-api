@@ -73,18 +73,8 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.KubeadmControlPlaneSpec)(nil), (*KubeadmControlPlaneSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec(a.(*v1beta1.KubeadmControlPlaneSpec), b.(*KubeadmControlPlaneSpec), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*KubeadmControlPlaneStatus)(nil), (*v1beta1.KubeadmControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha4_KubeadmControlPlaneStatus_To_v1beta1_KubeadmControlPlaneStatus(a.(*KubeadmControlPlaneStatus), b.(*v1beta1.KubeadmControlPlaneStatus), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.KubeadmControlPlaneStatus)(nil), (*KubeadmControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPlaneStatus(a.(*v1beta1.KubeadmControlPlaneStatus), b.(*KubeadmControlPlaneStatus), scope)
 	}); err != nil {
 		return err
 	}
@@ -110,11 +100,6 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddGeneratedConversionFunc((*KubeadmControlPlaneTemplateResource)(nil), (*v1beta1.KubeadmControlPlaneTemplateResource)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha4_KubeadmControlPlaneTemplateResource_To_v1beta1_KubeadmControlPlaneTemplateResource(a.(*KubeadmControlPlaneTemplateResource), b.(*v1beta1.KubeadmControlPlaneTemplateResource), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.KubeadmControlPlaneTemplateResource)(nil), (*KubeadmControlPlaneTemplateResource)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource(a.(*v1beta1.KubeadmControlPlaneTemplateResource), b.(*KubeadmControlPlaneTemplateResource), scope)
 	}); err != nil {
 		return err
 	}
@@ -158,8 +143,23 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*v1beta1.KubeadmControlPlaneSpec)(nil), (*KubeadmControlPlaneSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec(a.(*v1beta1.KubeadmControlPlaneSpec), b.(*KubeadmControlPlaneSpec), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.KubeadmControlPlaneStatus)(nil), (*KubeadmControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPlaneStatus(a.(*v1beta1.KubeadmControlPlaneStatus), b.(*KubeadmControlPlaneStatus), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*v1beta1.KubeadmControlPlaneTemplateResourceSpec)(nil), (*KubeadmControlPlaneSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_KubeadmControlPlaneTemplateResourceSpec_To_v1alpha4_KubeadmControlPlaneSpec(a.(*v1beta1.KubeadmControlPlaneTemplateResourceSpec), b.(*KubeadmControlPlaneSpec), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.KubeadmControlPlaneTemplateResource)(nil), (*KubeadmControlPlaneTemplateResource)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource(a.(*v1beta1.KubeadmControlPlaneTemplateResource), b.(*KubeadmControlPlaneTemplateResource), scope)
 	}); err != nil {
 		return err
 	}
@@ -260,6 +260,7 @@ func autoConvert_v1beta1_KubeadmControlPlaneMachineTemplate_To_v1alpha4_KubeadmC
 	}
 	out.InfrastructureRef = in.InfrastructureRef
 	out.NodeDrainTimeout = (*v1.Duration)(unsafe.Pointer(in.NodeDrainTimeout))
+	// WARNING: in.NodeVolumeDetachTimeout requires manual conversion: does not exist in peer-type
 	// WARNING: in.NodeDeletionTimeout requires manual conversion: does not exist in peer-type
 	return nil
 }
@@ -292,14 +293,11 @@ func autoConvert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlane
 	if err := kubeadmapiv1alpha4.Convert_v1beta1_KubeadmConfigSpec_To_v1alpha4_KubeadmConfigSpec(&in.KubeadmConfigSpec, &out.KubeadmConfigSpec, s); err != nil {
 		return err
 	}
+	// WARNING: in.RolloutBefore requires manual conversion: does not exist in peer-type
 	out.RolloutAfter = (*v1.Time)(unsafe.Pointer(in.RolloutAfter))
 	out.RolloutStrategy = (*RolloutStrategy)(unsafe.Pointer(in.RolloutStrategy))
+	// WARNING: in.RemediationStrategy requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec is an autogenerated conversion function.
-func Convert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec(in *v1beta1.KubeadmControlPlaneSpec, out *KubeadmControlPlaneSpec, s conversion.Scope) error {
-	return autoConvert_v1beta1_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec(in, out, s)
 }
 
 func autoConvert_v1alpha4_KubeadmControlPlaneStatus_To_v1beta1_KubeadmControlPlaneStatus(in *KubeadmControlPlaneStatus, out *v1beta1.KubeadmControlPlaneStatus, s conversion.Scope) error {
@@ -356,12 +354,8 @@ func autoConvert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPla
 	} else {
 		out.Conditions = nil
 	}
+	// WARNING: in.LastRemediation requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPlaneStatus is an autogenerated conversion function.
-func Convert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPlaneStatus(in *v1beta1.KubeadmControlPlaneStatus, out *KubeadmControlPlaneStatus, s conversion.Scope) error {
-	return autoConvert_v1beta1_KubeadmControlPlaneStatus_To_v1alpha4_KubeadmControlPlaneStatus(in, out, s)
 }
 
 func autoConvert_v1alpha4_KubeadmControlPlaneTemplate_To_v1beta1_KubeadmControlPlaneTemplate(in *KubeadmControlPlaneTemplate, out *v1beta1.KubeadmControlPlaneTemplate, s conversion.Scope) error {
@@ -445,15 +439,11 @@ func Convert_v1alpha4_KubeadmControlPlaneTemplateResource_To_v1beta1_KubeadmCont
 }
 
 func autoConvert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource(in *v1beta1.KubeadmControlPlaneTemplateResource, out *KubeadmControlPlaneTemplateResource, s conversion.Scope) error {
+	// WARNING: in.ObjectMeta requires manual conversion: does not exist in peer-type
 	if err := Convert_v1beta1_KubeadmControlPlaneTemplateResourceSpec_To_v1alpha4_KubeadmControlPlaneSpec(&in.Spec, &out.Spec, s); err != nil {
 		return err
 	}
 	return nil
-}
-
-// Convert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource is an autogenerated conversion function.
-func Convert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource(in *v1beta1.KubeadmControlPlaneTemplateResource, out *KubeadmControlPlaneTemplateResource, s conversion.Scope) error {
-	return autoConvert_v1beta1_KubeadmControlPlaneTemplateResource_To_v1alpha4_KubeadmControlPlaneTemplateResource(in, out, s)
 }
 
 func autoConvert_v1alpha4_KubeadmControlPlaneTemplateSpec_To_v1beta1_KubeadmControlPlaneTemplateSpec(in *KubeadmControlPlaneTemplateSpec, out *v1beta1.KubeadmControlPlaneTemplateSpec, s conversion.Scope) error {

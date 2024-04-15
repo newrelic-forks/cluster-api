@@ -27,9 +27,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -110,8 +112,9 @@ func (t *healthCheckTarget) needsRemediation(logger logr.Logger, timeoutForMachi
 		return true, time.Duration(0)
 	}
 
-	// Don't penalize any Machine/Node if the control plane has not been initialized.
-	if !conditions.IsTrue(t.Cluster, clusterv1.ControlPlaneInitializedCondition) {
+	// Don't penalize any Machine/Node if the control plane has not been initialized
+	// Exception of this rule are control plane machine itself, so the first control plane machine can be remediated.
+	if !conditions.IsTrue(t.Cluster, clusterv1.ControlPlaneInitializedCondition) && !util.IsControlPlaneMachine(t.Machine) {
 		logger.V(3).Info("Not evaluating target health because the control plane has not yet been initialized")
 		// Return a nextCheck time of 0 because we'll get requeued when the Cluster is updated.
 		return false, 0
@@ -132,18 +135,18 @@ func (t *healthCheckTarget) needsRemediation(logger logr.Logger, timeoutForMachi
 			return false, 0
 		}
 
-		controlPlaneInitializedTime := conditions.GetLastTransitionTime(t.Cluster, clusterv1.ControlPlaneInitializedCondition).Time
-		clusterInfraReadyTime := conditions.GetLastTransitionTime(t.Cluster, clusterv1.InfrastructureReadyCondition).Time
+		controlPlaneInitialized := conditions.GetLastTransitionTime(t.Cluster, clusterv1.ControlPlaneInitializedCondition)
+		clusterInfraReady := conditions.GetLastTransitionTime(t.Cluster, clusterv1.InfrastructureReadyCondition)
 		machineCreationTime := t.Machine.CreationTimestamp.Time
 
 		// Use the latest of the 3 times
 		comparisonTime := machineCreationTime
-		logger.V(3).Info("Determining comparison time", "machineCreationTime", machineCreationTime, "clusterInfraReadyTime", clusterInfraReadyTime, "controlPlaneInitializedTime", controlPlaneInitializedTime)
-		if controlPlaneInitializedTime.After(comparisonTime) {
-			comparisonTime = controlPlaneInitializedTime
+		logger.V(3).Info("Determining comparison time", "machineCreationTime", machineCreationTime, "clusterInfraReadyTime", clusterInfraReady, "controlPlaneInitializedTime", controlPlaneInitialized)
+		if conditions.IsTrue(t.Cluster, clusterv1.ControlPlaneInitializedCondition) && controlPlaneInitialized != nil && controlPlaneInitialized.Time.After(comparisonTime) {
+			comparisonTime = controlPlaneInitialized.Time
 		}
-		if clusterInfraReadyTime.After(comparisonTime) {
-			comparisonTime = clusterInfraReadyTime
+		if conditions.IsTrue(t.Cluster, clusterv1.InfrastructureReadyCondition) && clusterInfraReady != nil && clusterInfraReady.Time.After(comparisonTime) {
+			comparisonTime = clusterInfraReady.Time
 		}
 		logger.V(3).Info("Using comparison time", "time", comparisonTime)
 
@@ -200,9 +203,10 @@ func (r *Reconciler) getTargetsFromMHC(ctx context.Context, logger logr.Logger, 
 
 	targets := []healthCheckTarget{}
 	for k := range machines {
+		logger := logger.WithValues("Machine", klog.KObj(&machines[k]))
 		skip, reason := shouldSkipRemediation(&machines[k])
 		if skip {
-			logger.Info("skipping remediation", "machine", machines[k].Name, "reason", reason)
+			logger.Info("skipping remediation", "reason", reason)
 			continue
 		}
 
@@ -216,16 +220,18 @@ func (r *Reconciler) getTargetsFromMHC(ctx context.Context, logger logr.Logger, 
 			Machine:     &machines[k],
 			patchHelper: patchHelper,
 		}
-		node, err := r.getNodeFromMachine(ctx, clusterClient, target.Machine)
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				return nil, errors.Wrap(err, "error getting node")
-			}
+		if clusterClient != nil {
+			node, err := r.getNodeFromMachine(ctx, clusterClient, target.Machine)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return nil, errors.Wrap(err, "error getting node")
+				}
 
-			// A node has been seen for this machine, but it no longer exists
-			target.nodeMissing = true
+				// A node has been seen for this machine, but it no longer exists
+				target.nodeMissing = true
+			}
+			target.Node = node
 		}
-		target.Node = node
 		targets = append(targets, target)
 	}
 	return targets, nil
@@ -235,7 +241,7 @@ func (r *Reconciler) getTargetsFromMHC(ctx context.Context, logger logr.Logger, 
 // label selector.
 func (r *Reconciler) getMachinesFromMHC(ctx context.Context, mhc *clusterv1.MachineHealthCheck) ([]clusterv1.Machine, error) {
 	selector, err := metav1.LabelSelectorAsSelector(metav1.CloneSelectorAndAddLabel(
-		&mhc.Spec.Selector, clusterv1.ClusterLabelName, mhc.Spec.ClusterName,
+		&mhc.Spec.Selector, clusterv1.ClusterNameLabel, mhc.Spec.ClusterName,
 	))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build selector")
@@ -280,7 +286,7 @@ func (r *Reconciler) healthCheckTargets(targets []healthCheckTarget, logger logr
 	var healthy []healthCheckTarget
 
 	for _, t := range targets {
-		logger = logger.WithValues("Target", t.string())
+		logger := logger.WithValues("Target", t.string())
 		logger.V(3).Info("Health checking target")
 		needsRemediation, nextCheck := t.needsRemediation(logger, timeoutForMachineToHaveNode)
 

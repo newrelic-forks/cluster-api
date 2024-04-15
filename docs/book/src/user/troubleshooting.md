@@ -42,11 +42,19 @@ Cluster/capi-quickstart                                        False  Warning   
     └─3 Machines...                                            False  Info      Bootstrapping                77s    See capi-quickstart-md-0-5whtj-5d8c9746c9-f8sw8, capi-quickstart-md-0-5whtj-5d8c9746c9-hzxc2, ...
 ```
 
+<<<<<<< HEAD
 In the example above we can see that the Machine `capi-quickstart-6587k-xtvnz` has failed to start. The reason provided is `BootstrapFailed`. 
 
 To investigate why a machine fails to start you can inspect the conditions of the objects using `clusterctl describe --show-conditions all cluster capi-quickstart`. You can get more detailed information about the status of the machines using `kubectl describe machines`.
 
 To inspect the underlying infrastructure - in this case docker containers acting as Machines - you can access the logs using `docker logs <MACHINE-NAME>`. For example:
+=======
+In the example above we can see that the Machine `capi-quickstart-6587k-xtvnz` has failed to start. The reason provided is `BootstrapFailed`.
+
+To investigate why a machine fails to start you can inspect the conditions of the objects using `clusterctl describe --show-conditions all cluster capi-quickstart`. You can get more detailed information about the status of the machines using `kubectl describe machines`.
+
+To inspect the underlying infrastructure - in this case Docker containers acting as Machines - you can access the logs using `docker logs <MACHINE-NAME>`. For example:
+>>>>>>> v1.5.7
 
 ```shell
 docker logs capi-quickstart-6587k-xtvnz
@@ -63,8 +71,8 @@ To resolve this specific error please read [Cluster API with Docker  - "too many
 
 ## Node bootstrap failures when using CABPK with cloud-init
 
-Failures during Node bootstrapping can have a lot of different causes. For example, Cluster API resources might be 
-misconfigured or there might be problems with the network. The following steps describe how bootstrap failures can 
+Failures during Node bootstrapping can have a lot of different causes. For example, Cluster API resources might be
+misconfigured or there might be problems with the network. The following steps describe how bootstrap failures can
 be troubleshooted systematically.
 
 1. Access the Node via ssh.
@@ -74,9 +82,9 @@ be troubleshooted systematically.
 1. If you see that kubeadm times out waiting for the static Pods to come up, take a look at:
    1. containerd: `crictl ps -a`, `crictl logs`, `journalctl -u containerd`
    1. Kubelet: `journalctl -u kubelet --since "1 day ago"`
-      (Note: it might be helpful to increase the Kubelet log level by e.g. setting `--v=8` via 
+      (Note: it might be helpful to increase the Kubelet log level by e.g. setting `--v=8` via
       `systemctl edit --full kubelet && systemctl restart kubelet`)
-1. If Node bootstrapping consistently fails and the kubeadm logs are not verbose enough, the `kubeadm` verbosity 
+1. If Node bootstrapping consistently fails and the kubeadm logs are not verbose enough, the `kubeadm` verbosity
    can be increased via `KubeadmConfigSpec.Verbosity`.
 
 ## Labeling nodes with reserved labels such as `node-role.kubernetes.io` fails with kubeadm error during bootstrap
@@ -98,18 +106,18 @@ For convenience, here is an example one-liner to do this post installation
 ```bash
 # Kubernetes 1.19 (kubeadm 1.19 sets only the node-role.kubernetes.io/master label)
 kubectl get nodes --no-headers -l '!node-role.kubernetes.io/master' -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}' | xargs -I{} kubectl label node {} node-role.kubernetes.io/worker=''
-# Kubernetes >= 1.20 (kubeadm >= 1.20 sets the node-role.kubernetes.io/control-plane label) 
+# Kubernetes >= 1.20 (kubeadm >= 1.20 sets the node-role.kubernetes.io/control-plane label)
 kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}' | xargs -I{} kubectl label node {} node-role.kubernetes.io/worker=''
-```                  
+```
 
 ## Cluster API with Docker
 
 When provisioning workload clusters using Cluster API with the Docker infrastructure provider,
-provisioning might be stuck: 
- 
-1. if there are stopped containers on your machine from previous runs. Clean unused containers with [docker rm -f ](https://docs.docker.com/engine/reference/commandline/rm/). 
+provisioning might be stuck:
 
-2. if the docker space on your disk is being exhausted 
+1. if there are stopped containers on your machine from previous runs. Clean unused containers with [docker rm -f ](https://docs.docker.com/engine/reference/commandline/rm/).
+
+2. if the Docker space on your disk is being exhausted
     * Run [docker system df](https://docs.docker.com/engine/reference/commandline/system_df/) to inspect the disk space consumed by Docker resources.
     * Run [docker system prune --volumes](https://docs.docker.com/engine/reference/commandline/system_prune/) to prune dangling images, containers, volumes and networks.
 
@@ -127,12 +135,12 @@ sysctl fs.inotify.max_user_instances=8192
 
 Newly created clusters should be able to take advantage of the increased limits.
 
-### MacOS and Docker Desktop -  "too many open files" 
+### MacOS and Docker Desktop -  "too many open files"
 This error was also observed in Docker Desktop 4.3 and 4.4 on MacOS. It can be resolved by updating to Docker Desktop for Mac 4.5 or using a version lower than 4.3.
 
 [The upstream issue for this error is closed as of the release of Docker 4.5.0](https://github.com/docker/for-mac/issues/6071)
 
-Note: The below workaround is not recommended unless upgrade or downgrade can not be performed.
+Note: The below workaround is not recommended unless upgrade or downgrade cannot be performed.
 
 If using a version of Docker Desktop for Mac 4.3 or 4.4, the following workaround can be used:
 
@@ -161,11 +169,15 @@ clusterctl init --infrastructure docker
 ```
 ```bash
 Fetching providers
+<<<<<<< HEAD
 Installing cert-manager Version="v1.9.1"
+=======
+Installing cert-manager Version="v1.11.0"
+>>>>>>> v1.5.7
 Error: action failed after 10 attempts: failed to get cert-manager object /, Kind=, /: Object 'Kind' is missing in 'unstructured object has no kind'
 ```
 
-This error was fixed in more recent Cluster API releases on the 0.4 and 1.0 release branches. The simplest way to resolve the issue is to upgrade to a newer version of Cluster API for a given release. For who need to continue using an older release it is possible to override the repository used by `clusterctl init` in the clusterctl config file. The default location of this file is in `~/.cluster-api/clusterctl.yaml`.
+This error was fixed in more recent Cluster API releases on the 0.4 and 1.0 release branches. The simplest way to resolve the issue is to upgrade to a newer version of Cluster API for a given release. For who need to continue using an older release it is possible to override the repository used by `clusterctl init` in the clusterctl config file. The default location of this file is in `$XDG_CONFIG_HOME/cluster-api/clusterctl.yaml`.
 
 To do so add the following to the file:
 ```yaml
@@ -173,7 +185,11 @@ cert-manager:
   url: "https://github.com/cert-manager/cert-manager/releases/latest/cert-manager.yaml"
 ```
 
+<<<<<<< HEAD
 Alternatively a Cert Manager yaml file can be placed in the [clusterctl overrides layer](../clusterctl/configuration.md#overrides-layer) which is by default in `$HOME/.cluster-api/overrides`. A Cert Manager yaml file can be placed at `$(HOME)/.cluster-api/overrides/cert-manager/v1.9.1/cert-manager.yaml`
+=======
+Alternatively a Cert Manager yaml file can be placed in the [clusterctl overrides layer](../clusterctl/configuration.md#overrides-layer) which is by default in `$XDG_CONFIG_HOME/cluster-api/overrides`. A Cert Manager yaml file can be placed at e.g. `$XDG_CONFIG_HOME/cluster-api/overrides/cert-manager/v1.11.0/cert-manager.yaml`
+>>>>>>> v1.5.7
 
 More information on the clusterctl config file can be found at [its page in the book](../clusterctl/configuration.md#clusterctl-configuration-file)
 
@@ -208,8 +224,8 @@ clusterctl allows users to configure [image overrides](../clusterctl/configurati
 However, when the image override is pinning a provider image to a specific version, it could happen that this
 conflicts with clusterctl behavior of picking the latest version of a provider.
 
-E.g., if you are pinning KCP images to version v1.0.2 but then clusterctl init fetches yamls for version v1.1.0 or greater KCP will 
-fail to start with the following error: 
+E.g., if you are pinning KCP images to version v1.0.2 but then clusterctl init fetches yamls for version v1.1.0 or greater KCP will
+fail to start with the following error:
 
 ```bash
 invalid argument "ClusterTopology=false,KubeadmBootstrapFormatIgnition=false" for "--feature-gates" flag: unrecognized feature gate: KubeadmBootstrapFormatIgnition

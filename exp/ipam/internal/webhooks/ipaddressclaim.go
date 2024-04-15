@@ -26,6 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+<<<<<<< HEAD
+=======
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+>>>>>>> v1.5.7
 
 	ipamv1 "sigs.k8s.io/cluster-api/exp/ipam/api/v1alpha1"
 )
@@ -47,6 +51,7 @@ type IPAddressClaim struct {
 var _ webhook.CustomValidator = &IPAddressClaim{}
 
 // ValidateCreate implements webhook.CustomValidator.
+<<<<<<< HEAD
 func (webhook *IPAddressClaim) ValidateCreate(ctx context.Context, obj runtime.Object) error {
 	claim, ok := obj.(*ipamv1.IPAddressClaim)
 	if !ok {
@@ -55,11 +60,22 @@ func (webhook *IPAddressClaim) ValidateCreate(ctx context.Context, obj runtime.O
 
 	if claim.Spec.PoolRef.APIGroup == nil {
 		return field.Invalid(
+=======
+func (webhook *IPAddressClaim) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+	claim, ok := obj.(*ipamv1.IPAddressClaim)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddressClaim but got a %T", obj))
+	}
+
+	if claim.Spec.PoolRef.APIGroup == nil {
+		return nil, field.Invalid(
+>>>>>>> v1.5.7
 			field.NewPath("spec.poolRef.apiGroup"),
 			claim.Spec.PoolRef.APIGroup,
 			"the pool reference needs to contain a group")
 	}
 
+<<<<<<< HEAD
 	return nil
 }
 
@@ -76,14 +92,41 @@ func (webhook *IPAddressClaim) ValidateUpdate(ctx context.Context, oldObj, newOb
 
 	if !reflect.DeepEqual(oldClaim.Spec, newClaim.Spec) {
 		return field.Forbidden(
+=======
+	return nil, nil
+}
+
+// ValidateUpdate implements webhook.CustomValidator.
+func (webhook *IPAddressClaim) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	oldClaim, ok := oldObj.(*ipamv1.IPAddressClaim)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddressClaim but got a %T", oldObj))
+	}
+	newClaim, ok := newObj.(*ipamv1.IPAddressClaim)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected an IPAddressClaim but got a %T", newObj))
+	}
+
+	if !reflect.DeepEqual(oldClaim.Spec, newClaim.Spec) {
+		return nil, field.Forbidden(
+>>>>>>> v1.5.7
 			field.NewPath("spec"),
 			"the spec of IPAddressClaim is immutable",
 		)
 	}
+<<<<<<< HEAD
 	return nil
 }
 
 // ValidateDelete implements webhook.CustomValidator.
 func (webhook *IPAddressClaim) ValidateDelete(ctx context.Context, obj runtime.Object) error {
 	return nil
+=======
+	return nil, nil
+}
+
+// ValidateDelete implements webhook.CustomValidator.
+func (webhook *IPAddressClaim) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return nil, nil
+>>>>>>> v1.5.7
 }

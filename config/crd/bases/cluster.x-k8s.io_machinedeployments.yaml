@@ -3,8 +3,12 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+<<<<<<< HEAD
     controller-gen.kubebuilder.io/version: v0.9.1
   creationTimestamp: null
+=======
+    controller-gen.kubebuilder.io/version: v0.12.0
+>>>>>>> v1.5.7
   name: machinedeployments.cluster.x-k8s.io
 spec:
   group: cluster.x-k8s.io
@@ -41,10 +45,12 @@ spec:
       jsonPath: .status.unavailableReplicas
       name: Unavailable
       type: integer
+    deprecated: true
     name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: MachineDeployment is the Schema for the machinedeployments API.
+        description: "MachineDeployment is the Schema for the machinedeployments API.
+          \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -289,10 +295,10 @@ spec:
                               description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                               type: string
                             name:
-                              description: 'Name of the referent. More info: http://kubernetes.io/docs/user-guide/identifiers#names'
+                              description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names'
                               type: string
                             uid:
-                              description: 'UID of the referent. More info: http://kubernetes.io/docs/user-guide/identifiers#uids'
+                              description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#uids'
                               type: string
                           required:
                           - apiVersion
@@ -502,7 +508,7 @@ spec:
                 type: integer
             type: object
         type: object
-    served: true
+    served: false
     storage: false
     subresources:
       scale:
@@ -540,10 +546,12 @@ spec:
       jsonPath: .status.unavailableReplicas
       name: Unavailable
       type: integer
+    deprecated: true
     name: v1alpha4
     schema:
       openAPIV3Schema:
-        description: MachineDeployment is the Schema for the machinedeployments API.
+        description: "MachineDeployment is the Schema for the machinedeployments API.
+          \n Deprecated: This type will be removed in one of the next releases."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -1036,9 +1044,10 @@ spec:
                 minLength: 1
                 type: string
               minReadySeconds:
-                description: Minimum number of seconds for which a newly created machine
-                  should be ready. Defaults to 0 (machine will be considered available
-                  as soon as it is ready)
+                description: MinReadySeconds is the minimum number of seconds for
+                  which a Node for a newly created machine should be ready before
+                  considering the replica available. Defaults to 0 (machine will be
+                  considered available as soon as the Node is ready)
                 format: int32
                 type: integer
               paused:
@@ -1054,9 +1063,22 @@ spec:
                 format: int32
                 type: integer
               replicas:
-                default: 1
-                description: Number of desired machines. Defaults to 1. This is a
-                  pointer to distinguish between explicit zero and not specified.
+                description: "Number of desired machines. This is a pointer to distinguish
+                  between explicit zero and not specified. \n Defaults to: * if the
+                  Kubernetes autoscaler min size and max size annotations are set:
+                  - if it's a new MachineDeployment, use min size - if the replicas
+                  field of the old MachineDeployment is < min size, use min size -
+                  if the replicas field of the old MachineDeployment is > max size,
+                  use max size - if the replicas field of the old MachineDeployment
+                  is in the (min size, max size) range, keep the value from the oldMD
+                  * otherwise use 1 Note: Defaulting will be run whenever the replicas
+                  field is not set: * A new MachineDeployment is created with replicas
+                  not set. * On an existing MachineDeployment the replicas field was
+                  first set and is now unset. Those cases are especially relevant
+                  for the following Kubernetes autoscaler use cases: * A new MachineDeployment
+                  is created and replicas should be managed by the autoscaler * An
+                  existing MachineDeployment which initially wasn't controlled by
+                  the autoscaler should be later controlled by the autoscaler"
                 format: int32
                 type: integer
               revisionHistoryLimit:
@@ -1065,6 +1087,14 @@ spec:
                   Defaults to 1.
                 format: int32
                 type: integer
+              rolloutAfter:
+                description: 'RolloutAfter is a field to indicate a rollout should
+                  be performed after the specified time even if no changes have been
+                  made to the MachineDeployment. Example: In the YAML the time can
+                  be specified in the RFC3339 format. To specify the rolloutAfter
+                  target as March 9, 2023, at 9 am UTC use "2023-03-09T09:00:00Z".'
+                format: date-time
+                type: string
               selector:
                 description: Label selector for machines. Existing MachineSets whose
                   machines are selected by this will be the ones affected by this
@@ -1315,6 +1345,12 @@ spec:
                           value is 0, meaning that the node can be drained without
                           any time limitations. NOTE: NodeDrainTimeout is different
                           from `kubectl drain --timeout`'
+                        type: string
+                      nodeVolumeDetachTimeout:
+                        description: NodeVolumeDetachTimeout is the total amount of
+                          time that the controller will spend on waiting for all volumes
+                          to be detached. The default value is 0, meaning that the
+                          volumes can be detached without any time limitations.
                         type: string
                       providerID:
                         description: ProviderID is the identification ID of the machine
