@@ -8,5 +8,5 @@ spec:
     spec:
       containers:
       # Change the value of image field below to your controller image URL
-      - image: gcr.io/k8s-staging-cluster-api/capd-manager:main
+      - image: cf-registry.nr-ops.net/container-fabric/capd-manager-amd64:v1.6.4-nr1
         name: manager
