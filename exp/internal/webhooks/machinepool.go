@@ -65,7 +65,7 @@ func (webhook *MachinePool) Default(_ context.Context, obj runtime.Object) error
 	}
 	m.Labels[clusterv1.ClusterNameLabel] = m.Spec.ClusterName
 
-	if m.Spec.Replicas == nil && !annotations.IsExternallyManaged(m) {
+	if m.Spec.Replicas == nil && !annotations.ReplicasManagedByExternalAutoscaler(m) {
 		m.Spec.Replicas = pointer.Int32(1)
 	}
 
